@@ -4,10 +4,12 @@ from __future__ import annotations
 import hmac
 import os
 import re
+import calendar
 from datetime import timedelta
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 st.set_page_config(page_title="Prime Performance", page_icon="⚡", layout="wide")
@@ -82,6 +84,7 @@ import portal as P          # noqa: E402
 import engine as E          # noqa: E402
 import treino               # noqa: E402
 import calibracao as calib  # noqa: E402
+import historico            # noqa: E402
 from config import PROJETO, THRESHOLDS, now_br, today_br  # noqa: E402
 
 
@@ -155,6 +158,23 @@ def _cal_persist():
         return treino.carregar_calibracao()
     except Exception:
         return {}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _historico():
+    try:
+        return treino.carregar_historico()
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=1800, show_spinner="Atualizando historico (D-1)…")
+def _sync_historico(dref):
+    """Backfill leve: garante os dias recentes ate D-1 (max 3 por execucao)."""
+    try:
+        return historico.atualizar_ate(dref, dias_janela=60, max_fetch=3)
+    except Exception:
+        return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -283,8 +303,107 @@ if df_camp.empty:
     st.stop()
 kpi = E.resumo_kpis(df_camp)
 
-_view = st.radio("Visao", ["📊 Campanhas", "🧑‍💼 Operadores"], horizontal=True,
-                 label_visibility="collapsed")
+_view = st.radio("Visao", ["📊 Campanhas", "🧑‍💼 Operadores", "📈 Historico"],
+                 horizontal=True, label_visibility="collapsed")
+
+# =========================== HISTORICO ===================================== #
+if _view == "📈 Historico":
+    st.subheader("Analitico historico (D-1) 📈")
+    _d1 = today_br() - timedelta(days=1)
+    _ok_tr, _ = _status_treino()
+    if not _ok_tr:
+        st.info("Historico indisponivel — configure `TREINO_SHEET_ID` e "
+                "`GCP_SERVICE_ACCOUNT_JSON` nos secrets.")
+        st.stop()
+    _sync_historico(_d1)
+    h = historico.preparar(_historico())
+
+    cc = st.columns([3, 1])
+    cc[0].caption("Snapshot diario dos totais (Performance de Operacao). "
+                  "Atualiza automaticamente olhando para D-1.")
+    if cc[1].button("↻ Preencher 60 dias", use_container_width=True,
+                    help="Bootstrap: busca no portal os dias faltantes (pode demorar)."):
+        with st.spinner("Coletando historico do portal…"):
+            _nn = historico.atualizar_ate(_d1, dias_janela=60, max_fetch=60)
+        _historico.clear()
+        _sync_historico.clear()
+        st.success(f"{_nn} dias adicionados ao historico.")
+        st.rerun()
+
+    if h.empty:
+        st.info("Sem historico ainda. Clique em **Preencher 60 dias** para iniciar.")
+        st.stop()
+
+    _hoje = today_br()
+    _mes = h[(h["data"].dt.month == _hoje.month) & (h["data"].dt.year == _hoje.year)]
+    cad_mes = float(_mes["cadastradas"].sum())
+    conf_mes = float(_mes["confirmadas"].sum())
+    canc_mes = float(_mes["canceladas"].sum())
+    abord_mes = float(_mes["abordagens"].sum())
+    conv_mes = (100.0 * cad_mes / abord_mes) if abord_mes else 0.0
+    cancel_pct = (100.0 * canc_mes / cad_mes) if cad_mes else 0.0
+    _u = h.iloc[-1]
+    _p = h.iloc[-2] if len(h) >= 2 else None
+    _delta = (int(_u["cadastradas"] - _p["cadastradas"]) if _p is not None else None)
+
+    g1, g2, g3, g4 = st.columns(4)
+    kpi_card(g1, "Cadastradas no mes", _fmt(cad_mes),
+             f"{_mes['data'].dt.day.nunique()} dias com dado", "📝", "#22c55e")
+    kpi_card(g2, "Conversao no mes", f"{conv_mes:.1f}%", "cadastradas / abordagens",
+             "🎯", "#38bdf8")
+    kpi_card(g3, "Cancelamento", f"{cancel_pct:.1f}%", "canceladas / cadastradas",
+             "🚫", "#ffb020")
+    kpi_card(g4, f"Ultimo dia ({_u['data']:%d/%m})", _fmt(_u["cadastradas"]),
+             (f"{_delta:+d} vs dia anterior" if _delta is not None else "cadastradas"),
+             "📅", "#8b5cf6")
+    st.markdown("")
+
+    # meta + projecao
+    mc1, mc2, mc3 = st.columns(3)
+    meta = mc1.number_input("Meta mensal (cadastradas)", 0, 1_000_000, 0, 100)
+    _dias_mes = calendar.monthrange(_hoje.year, _hoje.month)[1]
+    _dias_dado = max(int(_mes["data"].dt.day.nunique()), 1)
+    proj = cad_mes / _dias_dado * _dias_mes
+    mc2.metric("Projecao do mes", _fmt(proj),
+               f"media {cad_mes / _dias_dado:.0f}/dia")
+    if meta > 0:
+        mc3.metric("Meta atingida", f"{100 * cad_mes / meta:.0f}%",
+                   f"projecao {100 * proj / meta:.0f}%")
+
+    # evolucao diaria
+    fig = go.Figure()
+    fig.add_bar(x=h["data"], y=h["cadastradas"], name="Cadastradas",
+                marker_color="#22c55e")
+    fig.add_scatter(x=h["data"], y=h["conv_pct"], name="Conversao %",
+                    yaxis="y2", mode="lines+markers", line=dict(color="#38bdf8"))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#c3cad6", height=380, margin=dict(t=30, b=10),
+        legend=dict(orientation="h", y=1.12),
+        yaxis=dict(title="Cadastradas", gridcolor="#232a38"),
+        yaxis2=dict(title="Conversao %", overlaying="y", side="right",
+                    showgrid=False))
+    fig.update_xaxes(gridcolor="#232a38")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # tabela historico
+    show = h.sort_values("data", ascending=False).copy()
+    show["data"] = show["data"].dt.strftime("%d/%m/%Y")
+    show = show.rename(columns={
+        "data": "Data", "ligacoes": "Ligacoes", "abordagens": "Abordagens",
+        "cadastradas": "Cadastradas", "confirmadas": "Confirmadas",
+        "canceladas": "Canceladas", "conv_pct": "Conversao %",
+        "abord_pct": "Abordagem %", "campanhas": "Campanhas"})
+    hsty = show.style
+    for gc in ["Cadastradas", "Conversao %"]:
+        if gc in show.columns:
+            hsty = hsty.apply(grad_col, subset=[gc], axis=0)
+    hsty = fmt_tabela(hsty, show)
+    st.dataframe(hsty, use_container_width=True, hide_index=True, height=360)
+    st.download_button("⬇️ Exportar historico (CSV)",
+                       show.to_csv(index=False).encode("utf-8-sig"),
+                       "historico_neo.csv", "text/csv")
+    st.stop()
 
 # =========================== OPERADORES ==================================== #
 if _view == "🧑‍💼 Operadores":

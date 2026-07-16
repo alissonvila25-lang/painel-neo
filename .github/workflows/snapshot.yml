@@ -1,0 +1,24 @@
+name: Snapshot diario NEO (D-1)
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # 09:00 UTC = 06:00 BRT
+  workflow_dispatch: {}
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+      - name: Coletar snapshot D-1
+        env:
+          AYTY_PORTAL_USER: ${{ secrets.AYTY_PORTAL_USER }}
+          AYTY_PORTAL_SENHA: ${{ secrets.AYTY_PORTAL_SENHA }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          TREINO_SHEET_ID: ${{ secrets.TREINO_SHEET_ID }}
+        run: python snapshot_diario.py

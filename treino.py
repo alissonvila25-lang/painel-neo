@@ -306,3 +306,36 @@ def carregar_calibracao() -> dict:
     except Exception:
         return {}
 
+
+# --- historico diario (snapshot D-1 acumulado) ---
+_ABA_HIST = "historico_diario"
+COLS_HIST = ["data", "ligacoes", "abordagens", "cadastradas", "confirmadas",
+             "canceladas", "conv_pct", "abord_pct", "campanhas"]
+
+
+def carregar_historico() -> pd.DataFrame:
+    """Historico diario acumulado. Vazio em falha."""
+    ws = _ws_named(_ABA_HIST, COLS_HIST)
+    if ws is None:
+        return pd.DataFrame()
+    try:
+        return pd.DataFrame(ws.get_all_records())
+    except Exception:
+        return pd.DataFrame()
+
+
+def salvar_historico(rows: list[dict]) -> int:
+    """Anexa linhas diarias ao historico. Retorna quantas gravou."""
+    if not rows:
+        return 0
+    ws = _ws_named(_ABA_HIST, COLS_HIST)
+    if ws is None:
+        return 0
+    try:
+        vals = [[_cel(r.get(c)) for c in COLS_HIST] for r in rows]
+        ws.append_rows(vals, value_input_option="USER_ENTERED")
+        return len(vals)
+    except Exception:
+        return 0
+
+
