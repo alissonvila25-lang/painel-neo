@@ -76,7 +76,9 @@ def normalizar_discador(df: pd.DataFrame) -> pd.DataFrame:
     d["Codigo"] = d["Campanha"].map(_codigo)
     d["Peso Disc"] = d["Peso"].map(_peso_int)
     for c in ("Hit Rate", "Penetração", "Spin Rate", "Total da Base",
-              "Disponíveis", "Livres", "Total Bloqueados", "Buffer"):
+              "Disponíveis", "Livres", "Total Bloqueados", "Buffer",
+              "Finalizados por Tentativa", "Finalizados pelo CRM",
+              "Total Finalizados"):
         if c in d.columns:
             d[c] = d[c].map(_num)
     d["Curva Disc"] = d["Grupo de Atendimento"].map(
@@ -85,15 +87,19 @@ def normalizar_discador(df: pd.DataFrame) -> pd.DataFrame:
     d = d.dropna(subset=["Codigo"])
     d["Codigo"] = d["Codigo"].astype(int)
     # agrega por campanha (varios grupos de atendimento)
-    ag = d.groupby("Codigo").agg(
-        **{"Peso Disc": ("Peso Disc", "max"),
-           "Hit Rate %": ("Hit Rate", "max"),
-           "Penetracao %": ("Penetração", "max"),
-           "Total da Base": ("Total da Base", "sum"),
-           "Disponiveis": ("Disponíveis", "sum"),
-           "Livres": ("Livres", "sum"),
-           "Bloqueados": ("Total Bloqueados", "sum"),
-           "Curva Disc": ("Curva Disc", lambda s: next((x for x in s if x), ""))})
+    _agg = {"Peso Disc": ("Peso Disc", "max"),
+            "Hit Rate %": ("Hit Rate", "max"),
+            "Penetracao %": ("Penetração", "max"),
+            "Total da Base": ("Total da Base", "sum"),
+            "Disponiveis": ("Disponíveis", "sum"),
+            "Livres": ("Livres", "sum"),
+            "Bloqueados": ("Total Bloqueados", "sum"),
+            "Curva Disc": ("Curva Disc", lambda s: next((x for x in s if x), ""))}
+    if "Finalizados por Tentativa" in d.columns:
+        _agg["Fin. Tentativa"] = ("Finalizados por Tentativa", "sum")
+    if "Total Finalizados" in d.columns:
+        _agg["Finalizados"] = ("Total Finalizados", "sum")
+    ag = d.groupby("Codigo").agg(**_agg)
     return ag.reset_index()
 
 
@@ -220,6 +226,7 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
             "Total da Base": int(total_base) if total_base else 0,
             "Disponiveis": int(disp) if disp else 0,
             "Disponivel %": round(disp_pct, 1) if not np.isnan(disp_pct) else None,
+            "Fin. Tentativa": int(_v(r.get("Fin. Tentativa"))),
             "Score": round(score, 0),
             "Status": status,
         })

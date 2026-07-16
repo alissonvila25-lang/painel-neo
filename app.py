@@ -384,7 +384,8 @@ if disc is not None and not disc.empty:
         _nomes = dict(zip(df_camp["Codigo"], df_camp["Campanha"]))
         _dd["Campanha"] = _dd["Codigo"].map(_nomes).fillna(_dd["Codigo"].astype(str))
         _dcols = ["Campanha", "Peso Disc", "Hit Rate %", "Penetracao %",
-                  "Total da Base", "Disponiveis", "Livres", "Bloqueados"]
+                  "Total da Base", "Disponiveis", "Livres", "Fin. Tentativa",
+                  "Bloqueados"]
         _dd = _dd[[c for c in _dcols if c in _dd.columns]].sort_values(
             "Disponiveis", ascending=False)
         _dsty = _dd.style
@@ -397,9 +398,9 @@ if disc is not None and not disc.empty:
 st.subheader("Diagnostico por campanha 📋")
 diag = df_camp.copy().sort_values("Codigo").rename(columns={"Peso Disc": "Peso Atual"})
 diag["Coerencia"] = diag["Coerencia"].map(lambda c: COER_LABEL.get(c, c))
-cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Config", "Peso Sugerido",
+cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido",
         "Coerencia", "Ligacoes", "% Abordagem", "Cadastradas", "% Conversao",
-        "Disponivel %", "Hit Rate %", "Status"]
+        "Disponivel %", "Fin. Tentativa", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
 sty = diag.style
 for gc in ["% Conversao", "Cadastradas", "% Abordagem", "Disponivel %", "Hit Rate %"]:
