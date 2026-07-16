@@ -7,9 +7,64 @@ import re
 from datetime import timedelta
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 st.set_page_config(page_title="Prime Performance", page_icon="⚡", layout="wide")
+
+# --- tema escuro + componentes (cards de KPI, barras de secao, tabelas) ---
+st.markdown(
+    """
+    <style>
+      .stApp { background: #0e1117; }
+      .block-container { padding-top: 1.2rem; }
+      h1, h2, h3 { color: #f5f7fa; }
+      h1 { font-weight:800; letter-spacing:.3px; }
+      .kpi {
+        position:relative; overflow:hidden;
+        background: linear-gradient(160deg,#1b2130,#12161f);
+        border: 1px solid #262d3d; border-radius: 16px; padding: 16px 18px 0 18px;
+        box-shadow: 0 6px 20px rgba(0,0,0,.38); height:100%;
+      }
+      .kpi .row { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+      .kpi .value { font-size:1.85rem; font-weight:800; line-height:1.05; }
+      .kpi .label { color:#8b95a7; font-size:.72rem; text-transform:uppercase;
+                    letter-spacing:.6px; margin-top:5px; }
+      .kpi .icon { font-size:1.5rem; line-height:1; opacity:.9;
+                   filter:drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
+      .kpi .foot { margin:14px -18px 0 -18px; padding:8px 18px; font-size:.74rem;
+                   font-weight:600; display:flex; justify-content:space-between;
+                   align-items:center; }
+      .kpi .foot .arrow { opacity:.85; font-size:.9rem; }
+      .card { border-radius:14px; padding:14px 16px; margin-bottom:10px;
+        border-left:5px solid #444; background:#161b26; }
+      .card .t { font-weight:700; font-size:1rem; color:#fff; }
+      .card .m { color:#c3cad6; font-size:.86rem; margin-top:4px; }
+      .crit  { border-left-color:#ff4b5c; background:#241419; }
+      .aten  { border-left-color:#ffb020; background:#241f14; }
+      .opor  { border-left-color:#22c55e; background:#122417; }
+      .info  { border-left-color:#3b82f6; background:#121a24; }
+      .curvapill { display:inline-block; margin-left:6px; padding:1px 9px;
+        border-radius:999px; font-size:.68rem; font-weight:700; color:#c7d2fe;
+        background:rgba(129,140,248,.15); border:1px solid rgba(129,140,248,.35);
+        vertical-align:middle; }
+      h2, h3, h4, h5 { position:relative; padding-left:20px !important; }
+      h2::before, h3::before, h4::before, h5::before {
+        content:""; position:absolute; left:0; top:.2em; bottom:.2em; width:4px;
+        border-radius:3px; background:linear-gradient(180deg,#38bdf8,#818cf8); }
+      hr { border:none; border-top:1px solid #232a38; margin:1.15rem 0; }
+      .stDownloadButton button, .stButton button {
+        border-radius:10px; border:1px solid #2f3a4d; background:#1b2130;
+        color:#dbe3f0; font-weight:600; transition:.15s ease; }
+      .stDownloadButton button:hover, .stButton button:hover {
+        border-color:#38bdf8; color:#fff; box-shadow:0 0 0 2px rgba(56,189,248,.15); }
+      [data-testid="stDataFrame"] { border-radius:12px; overflow:hidden;
+        border:1px solid #232a38; }
+      [data-testid="stSidebar"] { background:#0b0e14; border-right:1px solid #1c2230; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # --- ponte secrets -> env (para o portal.py ler AYTY_PORTAL_* no cloud) ---
 try:
@@ -105,32 +160,74 @@ def _cal_persist():
 # --------------------------------------------------------------------------- #
 # Helpers de estilo (sem matplotlib)
 # --------------------------------------------------------------------------- #
-def _rg(t: float) -> str:
+def _rg(t: float):
     t = max(0.0, min(1.0, t))
-    r = int(220 * (1 - t) + 40 * t)
-    g = int(60 * (1 - t) + 200 * t)
-    return f"rgba({r},{g},80,.28)"
+    if t < 0.5:
+        r, g, b = 255, int(255 * (t / 0.5)), 60
+    else:
+        r, g, b = int(255 * (1 - (t - 0.5) / 0.5)), 200, 70
+    return r, g, b
 
 
-def grad_col(s: pd.Series):
-    v = pd.to_numeric(s, errors="coerce")
-    lo, hi = v.min(), v.max()
-    if pd.isna(lo) or hi == lo:
-        return ["" for _ in s]
-    return [f"background-color:{_rg((x - lo) / (hi - lo))}" if pd.notna(x) else ""
-            for x in v]
+def grad_col(s):
+    vals = pd.to_numeric(s, errors="coerce")
+    lo, hi = vals.min(), vals.max()
+    rng = (hi - lo) if (pd.notna(hi) and pd.notna(lo) and hi != lo) else 0
+    out = []
+    for v in vals:
+        if pd.isna(v):
+            out.append("")
+            continue
+        t = 0.5 if rng == 0 else (float(v) - float(lo)) / float(rng)
+        r, g, b = _rg(t)
+        out.append(f"background-color: rgba({r},{g},{b},0.28); font-weight:600")
+    return out
+
+
+def fmt_tabela(styled, df):
+    """'%' (1 casa) nas porcentagens; inteiros sem '.0'; 1 casa so quando ha
+    decimal; texto intacto; NA vira travessao."""
+    fmt = {}
+    for c in df.columns:
+        if "%" in str(c):
+            fmt[c] = "{:.1f}%"
+            continue
+        col = pd.to_numeric(df[c], errors="coerce")
+        vals = col.dropna()
+        if vals.empty:
+            continue
+        fmt[c] = "{:.0f}" if (vals == vals.round(0)).all() else "{:.1f}"
+    return styled.format(fmt, na_rep="\u2014")
+
+
+def kpi_card(col, label, value, sub="", icon="", accent="#3b82f6"):
+    col.markdown(
+        f"<div class='kpi'><div class='row'>"
+        f"<div><div class='value' style='color:{accent}'>{value}</div>"
+        f"<div class='label'>{label}</div></div>"
+        f"<div class='icon'>{icon}</div></div>"
+        f"<div class='foot' style=\"background:linear-gradient(90deg,{accent}26,"
+        f"{accent}0d);border-top:1px solid {accent}40;color:{accent}\">"
+        f"<span>{sub or ''}</span><span class='arrow'>↗</span></div></div>",
+        unsafe_allow_html=True)
 
 
 STATUS_COLOR = {"Critico": "#ff4b5c", "Atencao": "#ffb020",
-                "Saudavel": "#22c55e", "Oportunidade": "#38bdf8"}
-COER_LABEL = {"SUBIR": "⬆️ Subir", "BAIXAR": "⬇️ Baixar", "OK": "✓ Coerente",
-              "OCIOSO": "😴 Ocioso", "SEM_DADO": "—"}
+                "Saudavel": "#3b82f6", "Oportunidade": "#22c55e"}
+COER_LABEL = {"SUBIR": "🔺 Subir peso", "BAIXAR": "🔻 Baixar peso",
+              "OK": "✅ Coerente", "OCIOSO": "⏸️ Ocioso", "SEM_DADO": "—"}
+COER_COLOR = {"SUBIR": "#3b82f6", "BAIXAR": "#ff4b5c", "OK": "#22c55e",
+              "OCIOSO": "#ffb020", "SEM_DADO": "#64748b"}
+
+
+def _fmt(v):
+    return f"{int(v):,}".replace(",", ".")
 
 
 # --------------------------------------------------------------------------- #
 # Sidebar
 # --------------------------------------------------------------------------- #
-st.sidebar.title("⚡ NEO — Controles")
+st.sidebar.title("⚡ Prime — Controles")
 periodo = st.sidebar.radio("Periodo", ["Hoje", "Ontem", "Ultimos 7 dias", "Personalizado"])
 if periodo == "Hoje":
     dt_ini = dt_fim = today_br()
@@ -198,74 +295,136 @@ if _view == "🧑‍💼 Operadores":
         st.stop()
     _min = st.slider("Min. ligacoes p/ ranquear", 0, 2000, 100, 50)
     v = op[op["Ligacoes"].fillna(0) >= _min].copy()
-    v["Conv/Lig %"] = (100.0 * v["Cadastradas"] / v["Ligacoes"].where(v["Ligacoes"] > 0)).round(1)
+    v["Conv/Lig %"] = (100.0 * v["Cadastradas"]
+                       / v["Ligacoes"].where(v["Ligacoes"] > 0)).round(1)
     v = v.sort_values(["Cadastradas", "Conv/Lig %"], ascending=False).reset_index(drop=True)
     n = len(v)
+    if "Curva" not in v.columns:
+        v["Curva"] = ""
+    v["Curva"] = v["Curva"].fillna("").astype(str).str.upper().str.strip()
     v["Curva sugerida"] = ["A" if i < n / 3 else "B" if i < 2 * n / 3 else "C"
                            for i in range(n)]
+    _ordm = {"A": 1, "B": 2, "C": 3, "D": 4, "": 9}
+    v["Ajuste"] = v.apply(
+        lambda r: ("⬆️ promover" if _ordm.get(r["Curva sugerida"], 9) < _ordm.get(r["Curva"], 9)
+                   else "⬇️ rebaixar" if _ordm.get(r["Curva sugerida"], 9) > _ordm.get(r["Curva"], 9)
+                   else "✓ ok"), axis=1)
     v.insert(0, "#", range(1, n + 1))
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Operadores", n)
-    c2.metric("Cadastradas (total)", int(v["Cadastradas"].sum()))
-    c3.metric("Media cadastr./op", f"{v['Cadastradas'].mean():.1f}")
-    cols = ["#", "Nome", "Supervisor", "Curva", "Curva sugerida", "Ligacoes",
-            "Cadastradas", "Conv/Lig %", "Dias"]
+
+    _mis = int((v["Curva sugerida"] != v["Curva"]).sum())
+    m1, m2, m3 = st.columns(3)
+    kpi_card(m1, "Operadores", f"{n}", f"min {_min} ligacoes", "🧑‍💼", "#8b5cf6")
+    kpi_card(m2, "Cadastradas (total)", _fmt(int(v["Cadastradas"].sum())),
+             "no periodo", "📝", "#22c55e")
+    kpi_card(m3, "Media cadastr./op", f"{v['Cadastradas'].mean():.1f}",
+             f"{_mis} em curva diferente", "📊", "#38bdf8")
+    st.markdown("")
+
+    def _cor_aj(x):
+        return ("color:#22c55e;font-weight:700" if "promover" in str(x)
+                else "color:#ff4b5c;font-weight:700" if "rebaixar" in str(x)
+                else "color:#8b95a7")
+
+    cols = ["#", "Nome", "Supervisor", "Curva", "Curva sugerida", "Ajuste",
+            "Ligacoes", "Cadastradas", "Conv/Lig %", "Dias"]
     show = v[[c for c in cols if c in v.columns]]
-    sty = show.style
+    sty = show.style.map(_cor_aj, subset=["Ajuste"])
     for gc in ["Cadastradas", "Conv/Lig %"]:
         if gc in show.columns:
             sty = sty.apply(grad_col, subset=[gc], axis=0)
+    sty = fmt_tabela(sty, show)
     st.dataframe(sty, use_container_width=True, hide_index=True, height=520)
     st.download_button("⬇️ Exportar (CSV)",
                        show.to_csv(index=False).encode("utf-8-sig"),
                        f"operadores_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
     st.caption("Curva atual = Curva ABC do portal (produção). Curva sugerida = "
-               "tercos por cadastradas/conversão no periodo.")
+               "terços por cadastradas/conversão no período (melhores → A).")
     st.stop()
 
 # =========================== CAMPANHAS ===================================== #
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("📞 Ligacoes", f"{kpi['ligacoes']:,}".replace(",", "."))
-c2.metric("📝 Cadastradas", f"{kpi['cadastradas']:,}".replace(",", "."))
-c3.metric("🎯 Conversao", f"{kpi['conv']:.1f}%")
-c4.metric("⚙️ Campanhas ativas", kpi["rodando"])
-c5.metric("🚀 Oportunidades", kpi["oportunidades"])
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+kpi_card(k1, "Ligacoes", _fmt(kpi["ligacoes"]), "discadas no periodo", "📞", "#3b82f6")
+kpi_card(k2, "Propostas Cadastradas", _fmt(kpi["cadastradas"]), "no periodo", "📝", "#22c55e")
+kpi_card(k3, "Conversao", f"{kpi['conv']:.1f}%", "cadastradas / abordagens", "🎯", "#38bdf8")
+kpi_card(k4, "Campanhas rodando", f"{kpi['rodando']}", "com discagem", "⚙️", "#8b5cf6")
+kpi_card(k5, "Criticas", f"{kpi['criticas']}", "acao urgente", "🚨", "#ff4b5c")
+kpi_card(k6, "Oportunidades", f"{kpi['oportunidades']}", "escalar peso", "🚀", "#22c55e")
+
+st.markdown("")
+
+# --- Saude da base (discador) ---
+_tot_base = float(df_camp["Total da Base"].sum()) if "Total da Base" in df_camp else 0.0
+_tot_disp = float(df_camp["Disponiveis"].sum()) if "Disponiveis" in df_camp else 0.0
+_pct_disp = (100.0 * _tot_disp / _tot_base) if _tot_base else 0.0
+if _tot_base:
+    st.markdown("##### Saude da base (discador) 🗃️")
+    b1, b2, b3 = st.columns(3)
+    kpi_card(b1, "Base total", _fmt(_tot_base), "nomes na fila", "🗃️", "#64748b")
+    kpi_card(b2, "Disponiveis", _fmt(_tot_disp), f"{_pct_disp:.0f}% da base", "♻️", "#38bdf8")
+    kpi_card(b3, "Consumida", f"{100 - _pct_disp:.0f}%", "ja trabalhada/bloqueada", "🔥", "#ffb020")
+    st.markdown("")
 
 if acoes:
     st.subheader("Acoes recomendadas 🧠")
+    _cls = {"CRITICO": "crit", "ATENCAO": "aten", "OPORTUNIDADE": "opor", "INFO": "info"}
     for a in acoes[:8]:
-        cor = {"CRITICO": "#ff4b5c", "ATENCAO": "#ffb020",
-               "OPORTUNIDADE": "#22c55e"}.get(a["Severidade"], "#8b95a7")
+        cur = (f"<span class='curvapill'>Curva {a['Curva']}</span>"
+               if a.get("Curva") else "")
         st.markdown(
-            f"<div style='border-left:4px solid {cor};padding:.3rem .7rem;"
-            f"margin:.2rem 0;background:rgba(255,255,255,.03)'>"
-            f"<b style='color:{cor}'>{a['Severidade']}</b> · {a['Titulo']} — "
-            f"<span style='opacity:.8'>{a['Campanha']}</span><br>"
-            f"<small style='opacity:.7'>{a['Detalhe']}</small></div>",
+            f"<div class='card {_cls.get(a['Severidade'], 'info')}'>"
+            f"<div class='t'>{a['Titulo']} — <span style='opacity:.8'>"
+            f"{a['Campanha']}</span>{cur}</div>"
+            f"<div class='m'>{a['Detalhe']}</div></div>",
             unsafe_allow_html=True)
 
 st.subheader("Diagnostico por campanha 📋")
-diag = df_camp.copy()
+diag = df_camp.copy().sort_values("Codigo")
 diag["Coerencia"] = diag["Coerencia"].map(lambda c: COER_LABEL.get(c, c))
 cols = ["Codigo", "Campanha", "Curva", "Peso Config", "Peso Disc", "Peso Sugerido",
         "Coerencia", "Ligacoes", "% Abordagem", "Cadastradas", "% Conversao",
         "Disponivel %", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
 sty = diag.style
-for gc in ["% Conversao", "Cadastradas", "Disponivel %", "Hit Rate %"]:
+for gc in ["% Conversao", "Cadastradas", "% Abordagem", "Disponivel %", "Hit Rate %"]:
     if gc in diag.columns:
         sty = sty.apply(grad_col, subset=[gc], axis=0)
 sty = sty.map(lambda v: f"color:{STATUS_COLOR.get(v, '')};font-weight:700"
               if v in STATUS_COLOR else "", subset=["Status"])
+sty = fmt_tabela(sty, diag)
 st.dataframe(sty, use_container_width=True, hide_index=True, height=430)
 st.download_button("⬇️ Exportar diagnostico (CSV)",
                    diag.to_csv(index=False).encode("utf-8-sig"),
                    f"campanhas_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
 
+# --- Mapa de conversao x volume ---
+_mapa = df_camp[df_camp["Ligacoes"] > 0].copy()
+if not _mapa.empty and _mapa["% Conversao"].notna().any():
+    st.subheader("Mapa de conversao × volume 🗺️")
+    _mapa["% Conversao"] = pd.to_numeric(_mapa["% Conversao"], errors="coerce").fillna(0)
+    fig = px.scatter(
+        _mapa, x="Ligacoes", y="% Conversao", size="Cadastradas",
+        color="Status", color_discrete_map=STATUS_COLOR,
+        hover_name="Campanha", size_max=40,
+        labels={"Ligacoes": "Ligacoes", "% Conversao": "Conversao %"})
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                      font_color="#c3cad6", height=420,
+                      legend=dict(orientation="h", y=-0.2))
+    fig.update_xaxes(gridcolor="#232a38"); fig.update_yaxes(gridcolor="#232a38")
+    st.plotly_chart(fig, use_container_width=True)
+
 if disc is not None and not disc.empty:
-    with st.expander("🎧 Visao do discador (base e contactabilidade)"):
-        dd = E.normalizar_discador(disc)
-        st.dataframe(dd, use_container_width=True, hide_index=True)
+    st.subheader("Visao do discador 🎧")
+    dd = E.normalizar_discador(disc)
+    dcols = ["Codigo", "Peso Disc", "Hit Rate %", "Penetracao %", "Total da Base",
+             "Disponiveis", "Livres", "Bloqueados"]
+    dd = dd[[c for c in dcols if c in dd.columns]].sort_values(
+        "Disponiveis", ascending=False) if not dd.empty else dd
+    dsty = dd.style
+    for gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
+        if gc in dd.columns:
+            dsty = dsty.apply(grad_col, subset=[gc], axis=0)
+    dsty = fmt_tabela(dsty, dd)
+    st.dataframe(dsty, use_container_width=True, hide_index=True)
 
 
 # --------------------------------------------------------------------------- #
