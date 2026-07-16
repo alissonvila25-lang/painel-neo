@@ -377,6 +377,23 @@ if acoes:
             f"<div class='m'>{a['Detalhe']}</div></div>",
             unsafe_allow_html=True)
 
+if disc is not None and not disc.empty:
+    _dd = E.normalizar_discador(disc)
+    if not _dd.empty:
+        st.subheader("Visao do discador 🎧")
+        _nomes = dict(zip(df_camp["Codigo"], df_camp["Campanha"]))
+        _dd["Campanha"] = _dd["Codigo"].map(_nomes).fillna(_dd["Codigo"].astype(str))
+        _dcols = ["Campanha", "Peso Disc", "Hit Rate %", "Penetracao %",
+                  "Total da Base", "Disponiveis", "Livres", "Bloqueados"]
+        _dd = _dd[[c for c in _dcols if c in _dd.columns]].sort_values(
+            "Disponiveis", ascending=False)
+        _dsty = _dd.style
+        for _gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
+            if _gc in _dd.columns:
+                _dsty = _dsty.apply(grad_col, subset=[_gc], axis=0)
+        _dsty = fmt_tabela(_dsty, _dd)
+        st.dataframe(_dsty, use_container_width=True, hide_index=True)
+
 st.subheader("Diagnostico por campanha 📋")
 diag = df_camp.copy().sort_values("Codigo")
 diag["Coerencia"] = diag["Coerencia"].map(lambda c: COER_LABEL.get(c, c))
@@ -411,20 +428,6 @@ if not _mapa.empty and _mapa["% Conversao"].notna().any():
                       legend=dict(orientation="h", y=-0.2))
     fig.update_xaxes(gridcolor="#232a38"); fig.update_yaxes(gridcolor="#232a38")
     st.plotly_chart(fig, use_container_width=True)
-
-if disc is not None and not disc.empty:
-    st.subheader("Visao do discador 🎧")
-    dd = E.normalizar_discador(disc)
-    dcols = ["Codigo", "Peso Disc", "Hit Rate %", "Penetracao %", "Total da Base",
-             "Disponiveis", "Livres", "Bloqueados"]
-    dd = dd[[c for c in dcols if c in dd.columns]].sort_values(
-        "Disponiveis", ascending=False) if not dd.empty else dd
-    dsty = dd.style
-    for gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
-        if gc in dd.columns:
-            dsty = dsty.apply(grad_col, subset=[gc], axis=0)
-    dsty = fmt_tabela(dsty, dd)
-    st.dataframe(dsty, use_container_width=True, hide_index=True)
 
 
 # --------------------------------------------------------------------------- #
