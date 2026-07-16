@@ -151,10 +151,14 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
         disp_pct = (100.0 * disp / total_base) if total_base > 0 else np.nan
         peso_cfg = r.get("Peso Config")
         peso_disc = r.get("Peso Disc")
-        peso_ref = peso_cfg if pd.notna(peso_cfg) else peso_disc
+        # No NEO o peso REAL que roda e o do DISCADOR; a config de campanha quase
+        # nunca vem preenchida -> discador tem prioridade como referencia.
+        peso_ref = peso_disc if pd.notna(peso_disc) else peso_cfg
         tem_peso = pd.notna(peso_ref)
-        curva = (r.get("Curva") if isinstance(r.get("Curva"), str) and r.get("Curva")
-                 else (r.get("Curva Disc") or ""))
+        _cv = r.get("Curva")
+        if not (isinstance(_cv, str) and _cv.strip()):
+            _cv = r.get("Curva Disc")
+        curva = _cv.strip().upper() if isinstance(_cv, str) and _cv.strip() else ""
         hit = float(r.get("Hit Rate %") or np.nan)
         rodando = lig > 0
 
@@ -199,8 +203,8 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
             "Codigo": int(r["Codigo"]),
             "Campanha": r.get("Campanha"),
             "Curva": curva,
-            "Peso Config": peso_cfg if pd.notna(peso_cfg) else None,
-            "Peso Disc": peso_disc if pd.notna(peso_disc) else None,
+            "Peso Config": float(peso_cfg) if pd.notna(peso_cfg) else np.nan,
+            "Peso Disc": float(peso_disc) if pd.notna(peso_disc) else np.nan,
             "Coerencia": coer,
             "Rodando": rodando,
             "Ligacoes": int(lig),
@@ -257,8 +261,8 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict) -> pd.Series:
     (conversao comprimida x base disponivel). Simplificado: sem base virgem."""
     n = len(df)
     out = pd.Series([None] * n, index=df.index, dtype="object")
-    ref = pd.to_numeric(df.get("Peso Config"), errors="coerce")
-    ref = ref.fillna(pd.to_numeric(df.get("Peso Disc"), errors="coerce"))
+    ref = pd.to_numeric(df.get("Peso Disc"), errors="coerce")
+    ref = ref.fillna(pd.to_numeric(df.get("Peso Config"), errors="coerce"))
     conv = pd.to_numeric(df.get("% Conversao"), errors="coerce")
     disp = pd.to_numeric(df.get("Disponivel %"), errors="coerce")
     disp_abs = pd.to_numeric(df.get("Disponiveis"), errors="coerce").fillna(0)
@@ -295,14 +299,31 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict) -> pd.Series:
             if pd.notna(cvv) and float(cvv) < cb and alvo > atual:
                 alvo = atual
             out.at[i] = alvo
-    return out
+    # fallback: toda campanha com peso de referencia recebe uma sugestao (fora
+    # do pool: sozinha na curva, base esgotada, etc.), para nunca ficar vazia.
+    for i in df.index:
+        if out.at[i] is not None:
+            continue
+        pv = ref.loc[i]
+        if pd.isna(pv) or pv <= 0:
+            continue
+        atual = int(pv)
+        cvv = conv.loc[i]
+        dp = disp.loc[i]
+        if pd.notna(dp) and dp < 3:
+            out.at[i] = max(1, int(round(atual * 0.5)))   # base esgotada -> reduzir
+        elif pd.notna(cvv) and float(cvv) < cb:
+            out.at[i] = max(1, int(round(atual * 0.7)))   # conversao ruim -> reduzir
+        else:
+            out.at[i] = atual                              # manter
+    return pd.to_numeric(out, errors="coerce")
 
 
 def _reconciliar_coerencia(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or "Peso Sugerido" not in df.columns:
         return df
-    ref = pd.to_numeric(df.get("Peso Config"), errors="coerce")
-    ref = ref.fillna(pd.to_numeric(df.get("Peso Disc"), errors="coerce"))
+    ref = pd.to_numeric(df.get("Peso Disc"), errors="coerce")
+    ref = ref.fillna(pd.to_numeric(df.get("Peso Config"), errors="coerce"))
     sug = pd.to_numeric(df["Peso Sugerido"], errors="coerce")
     for i in df.index:
         c = df.at[i, "Coerencia"]

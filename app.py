@@ -395,9 +395,9 @@ if disc is not None and not disc.empty:
         st.dataframe(_dsty, use_container_width=True, hide_index=True)
 
 st.subheader("Diagnostico por campanha 📋")
-diag = df_camp.copy().sort_values("Codigo")
+diag = df_camp.copy().sort_values("Codigo").rename(columns={"Peso Disc": "Peso Atual"})
 diag["Coerencia"] = diag["Coerencia"].map(lambda c: COER_LABEL.get(c, c))
-cols = ["Codigo", "Campanha", "Curva", "Peso Config", "Peso Disc", "Peso Sugerido",
+cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Config", "Peso Sugerido",
         "Coerencia", "Ligacoes", "% Abordagem", "Cadastradas", "% Conversao",
         "Disponivel %", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
