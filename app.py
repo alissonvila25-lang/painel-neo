@@ -9,7 +9,7 @@ from datetime import timedelta
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="NEO — Operacao", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Prime Performance", page_icon="⚡", layout="wide")
 
 # --- ponte secrets -> env (para o portal.py ler AYTY_PORTAL_* no cloud) ---
 try:
@@ -39,7 +39,7 @@ def _require_login():
         return  # sem senha configurada -> painel aberto
     if st.session_state.get("neo_auth"):
         return
-    st.title("⚡ NEO — Operacao")
+    st.title("⚡ Prime Performance")
     with st.form("login"):
         p = st.text_input("Senha", type="password")
         if st.form_submit_button("Entrar") and hmac.compare_digest(p, senha):
@@ -166,7 +166,7 @@ st.sidebar.caption("Fonte: Portal Ayty CRM (NEO ENERGIA)")
 # --------------------------------------------------------------------------- #
 # Corpo
 # --------------------------------------------------------------------------- #
-st.title("Painel NEO ENERGIA ⚡")
+st.title("Prime Performance ⚡")
 st.caption(f"Atualizado {now_br():%d/%m/%Y %H:%M} · periodo {dt_ini:%d/%m} a {dt_fim:%d/%m}")
 
 if not os.environ.get("AYTY_PORTAL_SENHA"):
