@@ -371,18 +371,41 @@ def resumo_kpis(df_camp: pd.DataFrame) -> dict:
 
 
 def operadores(curva_abc: pd.DataFrame, tmo: pd.DataFrame) -> pd.DataFrame:
-    """Junta Curva ABC (curva + confirmadas) com TMO (ligacoes/cadastradas)."""
+    """Junta Curva ABC (curva + confirmadas) com TMO (ligacoes/cadastradas).
+
+    Abordagens por operador sao DERIVADAS do TMO: como o portal so da tempos,
+    usamos abordagens ~ Tempo Total de Abordagem / Tempo Medio de Abordagem.
+    """
     if tmo is None or tmo.empty:
         return pd.DataFrame()
+
+    def _hms(s) -> float:
+        s = str(s).strip()
+        if not s or ":" not in s:
+            return np.nan
+        try:
+            parts = [int(x) for x in s.split(":")]
+        except ValueError:
+            return np.nan
+        while len(parts) < 3:
+            parts = [0] + parts
+        return parts[-3] * 3600 + parts[-2] * 60 + parts[-1]
+
     t = tmo.copy()
     for c in ("Ligações", "Propostas Cadastradas", "Propostas Confirmadas"):
         if c in t.columns:
             t[c] = t[c].map(_num)
+    # abordagens ~ tempo total / tempo medio de abordagem
+    if {"Tempo Total de Abordagem", "Tempo Médio de Abordagem"} <= set(t.columns):
+        _tt = t["Tempo Total de Abordagem"].map(_hms)
+        _tm = t["Tempo Médio de Abordagem"].map(_hms)
+        t["Abordagens"] = (_tt / _tm.where(_tm > 0)).round()
     t = t.rename(columns={"Matrícula do Usuário": "Matricula",
                           "Nome do Usuário": "Nome", "Ligações": "Ligacoes",
                           "Propostas Cadastradas": "Cadastradas",
                           "Propostas Confirmadas": "Confirmadas"})
-    cols = ["Matricula", "Nome", "Ligacoes", "Cadastradas", "Confirmadas"]
+    cols = ["Matricula", "Nome", "Ligacoes", "Abordagens", "Cadastradas",
+            "Confirmadas"]
     t = t[[c for c in cols if c in t.columns]]
     # mantem SO operadores reais (matricula = numero); dropa linha de totais.
     _mat = t["Matricula"].astype(str).str.strip()

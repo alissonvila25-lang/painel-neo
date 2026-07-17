@@ -503,6 +503,9 @@ if _view == "🧑‍💼 Operadores":
     v = op[op["Ligacoes"].fillna(0) >= _min].copy()
     v["Conv/Lig %"] = (100.0 * v["Cadastradas"]
                        / v["Ligacoes"].where(v["Ligacoes"] > 0)).round(1)
+    if "Abordagens" in v.columns:
+        v["% Abordagem"] = (100.0 * v["Abordagens"]
+                            / v["Ligacoes"].where(v["Ligacoes"] > 0)).round(1)
     if "Dias" in v.columns:
         v["Vendas/dia"] = (v["Cadastradas"]
                            / v["Dias"].where(v["Dias"] > 0)).round(2)
@@ -510,7 +513,28 @@ if _view == "🧑‍💼 Operadores":
     n = len(v)
     v.insert(0, "#", range(1, n + 1))
 
-    m1, m2, m3 = st.columns(3)
+    # sinal de queima de mailing (alto volume com conversao/abordagem baixas)
+    _ligmed = float(v["Ligacoes"].median()) if n else 0.0
+    _convmed = float(v["Conv/Lig %"].median(skipna=True)) if n else 0.0
+    _abmed = (float(v["% Abordagem"].median(skipna=True))
+              if "% Abordagem" in v.columns and v["% Abordagem"].notna().any() else 0.0)
+
+    def _mailing(r):
+        _alto = r["Ligacoes"] >= _ligmed
+        _cv = 0.0 if pd.isna(r["Conv/Lig %"]) else float(r["Conv/Lig %"])
+        _ab = float(r["% Abordagem"]) if ("% Abordagem" in r.index
+                                          and pd.notna(r["% Abordagem"])) else None
+        _ab_ruim = (_abmed > 0 and _ab is not None and _ab < 0.5 * _abmed)
+        if _alto and (_cv < 0.5 * _convmed or _ab_ruim):
+            return "🔥 queimando"
+        if _alto and _cv < _convmed:
+            return "⚠️ atencao"
+        return "✓ ok"
+
+    v["Mailing"] = v.apply(_mailing, axis=1)
+    _queima = int((v["Mailing"] == "🔥 queimando").sum())
+
+    m1, m2, m3, m4 = st.columns(4)
     kpi_card(m1, "Operadores", f"{n}", f"min {_min} ligacoes", "🧑‍💼", "#8b5cf6")
     kpi_card(m2, "Cadastradas (total)", _fmt(int(v["Cadastradas"].sum())),
              "no periodo", "📝", "#22c55e")
@@ -518,13 +542,22 @@ if _view == "🧑‍💼 Operadores":
            and v["Vendas/dia"].notna().any() else v["Cadastradas"].mean())
     kpi_card(m3, "Media vendas/op/dia", f"{_md:.1f}", "por dia trabalhado",
              "📊", "#38bdf8")
+    kpi_card(m4, "Risco de queima", f"{_queima}", "operadores 🔥", "🔥", "#ff4b5c")
     st.markdown("")
 
-    cols = ["#", "Nome", "Supervisor", "Ligacoes", "Cadastradas", "Vendas/dia",
-            "Conv/Lig %", "Dias"]
+    def _cor_mail(x):
+        _s = str(x)
+        if "🔥" in _s:
+            return "background-color:rgba(255,75,92,.22);color:#ff4b5c;font-weight:700"
+        if "⚠️" in _s:
+            return "color:#ffb020;font-weight:700"
+        return "color:#8b95a7"
+
+    cols = ["#", "Nome", "Supervisor", "Ligacoes", "Abordagens", "% Abordagem",
+            "Cadastradas", "Vendas/dia", "Conv/Lig %", "Mailing", "Dias"]
     show = v[[c for c in cols if c in v.columns]]
-    sty = show.style
-    for gc in ["Cadastradas", "Vendas/dia", "Conv/Lig %"]:
+    sty = show.style.map(_cor_mail, subset=["Mailing"])
+    for gc in ["Cadastradas", "Vendas/dia", "Conv/Lig %", "% Abordagem"]:
         if gc in show.columns:
             sty = sty.apply(grad_col, subset=[gc], axis=0)
     sty = fmt_tabela(sty, show)
@@ -532,8 +565,9 @@ if _view == "🧑‍💼 Operadores":
     st.download_button("⬇️ Exportar (CSV)",
                        show.to_csv(index=False).encode("utf-8-sig"),
                        f"operadores_neo_{_op_ini:%Y%m%d}_{_op_fim:%Y%m%d}.csv", "text/csv")
-    st.caption("Ranking por producao (cadastradas) no periodo. "
-               "Vendas/dia = cadastradas ÷ dias trabalhados.")
+    st.caption("Vendas/dia = cadastradas ÷ dias. 🔥 = alto volume com conversao/"
+               "abordagem bem abaixo da media (possivel queima de mailing). "
+               "Abordagens estimadas via tempo do TMO.")
     st.stop()
 
 # =========================== CAMPANHAS ===================================== #
