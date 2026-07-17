@@ -427,36 +427,19 @@ if _view == "🧑‍💼 Operadores":
                        / v["Ligacoes"].where(v["Ligacoes"] > 0)).round(1)
     v = v.sort_values(["Cadastradas", "Conv/Lig %"], ascending=False).reset_index(drop=True)
     n = len(v)
-    if "Curva" not in v.columns:
-        v["Curva"] = ""
-    v["Curva"] = v["Curva"].fillna("").astype(str).str.upper().str.strip()
-    v["Curva sugerida"] = ["A" if i < n / 3 else "B" if i < 2 * n / 3 else "C"
-                           for i in range(n)]
-    _ordm = {"A": 1, "B": 2, "C": 3, "D": 4, "": 9}
-    v["Ajuste"] = v.apply(
-        lambda r: ("⬆️ promover" if _ordm.get(r["Curva sugerida"], 9) < _ordm.get(r["Curva"], 9)
-                   else "⬇️ rebaixar" if _ordm.get(r["Curva sugerida"], 9) > _ordm.get(r["Curva"], 9)
-                   else "✓ ok"), axis=1)
     v.insert(0, "#", range(1, n + 1))
 
-    _mis = int((v["Curva sugerida"] != v["Curva"]).sum())
     m1, m2, m3 = st.columns(3)
     kpi_card(m1, "Operadores", f"{n}", f"min {_min} ligacoes", "🧑‍💼", "#8b5cf6")
     kpi_card(m2, "Cadastradas (total)", _fmt(int(v["Cadastradas"].sum())),
              "no periodo", "📝", "#22c55e")
     kpi_card(m3, "Media cadastr./op", f"{v['Cadastradas'].mean():.1f}",
-             f"{_mis} em curva diferente", "📊", "#38bdf8")
+             "por operador", "📊", "#38bdf8")
     st.markdown("")
 
-    def _cor_aj(x):
-        return ("color:#22c55e;font-weight:700" if "promover" in str(x)
-                else "color:#ff4b5c;font-weight:700" if "rebaixar" in str(x)
-                else "color:#8b95a7")
-
-    cols = ["#", "Nome", "Supervisor", "Curva", "Curva sugerida", "Ajuste",
-            "Ligacoes", "Cadastradas", "Conv/Lig %", "Dias"]
+    cols = ["#", "Nome", "Supervisor", "Ligacoes", "Cadastradas", "Conv/Lig %", "Dias"]
     show = v[[c for c in cols if c in v.columns]]
-    sty = show.style.map(_cor_aj, subset=["Ajuste"])
+    sty = show.style
     for gc in ["Cadastradas", "Conv/Lig %"]:
         if gc in show.columns:
             sty = sty.apply(grad_col, subset=[gc], axis=0)
@@ -465,8 +448,7 @@ if _view == "🧑‍💼 Operadores":
     st.download_button("⬇️ Exportar (CSV)",
                        show.to_csv(index=False).encode("utf-8-sig"),
                        f"operadores_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
-    st.caption("Curva atual = Curva ABC do portal (produção). Curva sugerida = "
-               "terços por cadastradas/conversão no período (melhores → A).")
+    st.caption("Ranking por producao (cadastradas) e conversao por ligacao no periodo.")
     st.stop()
 
 # =========================== CAMPANHAS ===================================== #

@@ -384,13 +384,16 @@ def operadores(curva_abc: pd.DataFrame, tmo: pd.DataFrame) -> pd.DataFrame:
                           "Propostas Confirmadas": "Confirmadas"})
     cols = ["Matricula", "Nome", "Ligacoes", "Cadastradas", "Confirmadas"]
     t = t[[c for c in cols if c in t.columns]]
+    # mantem SO operadores reais (matricula = numero); dropa linha de totais.
+    _mat = t["Matricula"].astype(str).str.strip()
+    t = t[_mat.str.match(r"^\d{4,}$")].copy()
     if curva_abc is not None and not curva_abc.empty:
         a = curva_abc.rename(columns={"Matrícula": "Matricula", "Usuário": "Nome",
                                       "Curva": "Curva",
                                       "Qtd. Dias Trabalhados": "Dias",
                                       "Supervisor": "Supervisor"})
-        keep = [c for c in ["Matricula", "Curva", "Dias", "Supervisor"] if c in a.columns]
+        keep = [c for c in ["Matricula", "Dias", "Supervisor"] if c in a.columns]
         t = t.merge(a[keep], on="Matricula", how="left")
     if "Dias" in t.columns:
         t["Dias"] = t["Dias"].map(_num)
-    return t
+    return t.reset_index(drop=True)
