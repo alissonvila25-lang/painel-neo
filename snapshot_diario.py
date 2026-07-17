@@ -6,9 +6,14 @@ Rodado pelo GitHub Action (cron) ou manualmente. Le credenciais do AMBIENTE:
 import datetime as dt
 
 import historico as H
+import treino
 from config import today_br
 
 if __name__ == "__main__":
+    ok, msg = treino.status()
+    print(f"[snapshot] treino/planilha: ok={ok} — {msg}")
+    _h = treino.carregar_historico()
+    print(f"[snapshot] historico existente: {len(_h)} linha(s)")
     d1 = today_br() - dt.timedelta(days=1)
     # preenche qualquer dia faltante da ultima semana ate D-1 (robusto a falhas).
     n = H.atualizar_ate(d1, dias_janela=7, max_fetch=7)
