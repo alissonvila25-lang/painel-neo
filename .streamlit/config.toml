@@ -1,0 +1,8 @@
+[theme]
+# Forca o tema ESCURO para todos os visitantes (independe do navegador/SO),
+# garantindo legibilidade consistente com o design do painel.
+base = "dark"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#1b2130"
+textColor = "#f5f7fa"
+primaryColor = "#38bdf8"
