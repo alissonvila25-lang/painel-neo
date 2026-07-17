@@ -310,7 +310,7 @@ def carregar_calibracao() -> dict:
 # --- historico diario (snapshot D-1 acumulado) ---
 _ABA_HIST = "historico_diario"
 COLS_HIST = ["data", "ligacoes", "abordagens", "cadastradas", "confirmadas",
-             "canceladas", "conv_pct", "abord_pct", "campanhas"]
+             "canceladas", "conv_pct", "abord_pct", "campanhas", "operadores"]
 
 
 def carregar_historico() -> pd.DataFrame:

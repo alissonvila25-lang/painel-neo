@@ -351,18 +351,23 @@ if _view == "📈 Historico":
     abord_mes = float(_mes["abordagens"].sum())
     conv_mes = (100.0 * cad_mes / abord_mes) if abord_mes else 0.0
     cancel_pct = (100.0 * canc_mes / cad_mes) if cad_mes else 0.0
+    _mvop = (float(_mes["vendas_op"].mean())
+             if "vendas_op" in _mes.columns and _mes["vendas_op"].notna().any()
+             else 0.0)
     _u = h.iloc[-1]
     _p = h.iloc[-2] if len(h) >= 2 else None
     _delta = (int(_u["cadastradas"] - _p["cadastradas"]) if _p is not None else None)
 
-    g1, g2, g3, g4 = st.columns(4)
+    g1, g2, g3, g4, g5 = st.columns(5)
     kpi_card(g1, "Cadastradas no mes", _fmt(cad_mes),
              f"{_mes['data'].dt.day.nunique()} dias com dado", "📝", "#22c55e")
     kpi_card(g2, "Conversao no mes", f"{conv_mes:.1f}%", "cadastradas / abordagens",
              "🎯", "#38bdf8")
     kpi_card(g3, "Cancelamento", f"{cancel_pct:.1f}%", "canceladas / cadastradas",
              "🚫", "#ffb020")
-    kpi_card(g4, f"Ultimo dia ({_u['data']:%d/%m})", _fmt(_u["cadastradas"]),
+    kpi_card(g4, "Vendas/operador/dia", f"{_mvop:.1f}", "media do mes",
+             "🧑‍💼", "#14b8a6")
+    kpi_card(g5, f"Ultimo dia ({_u['data']:%d/%m})", _fmt(_u["cadastradas"]),
              (f"{_delta:+d} vs dia anterior" if _delta is not None else "cadastradas"),
              "📅", "#8b5cf6")
     st.markdown("")
@@ -402,7 +407,8 @@ if _view == "📈 Historico":
         "data": "Data", "ligacoes": "Ligacoes", "abordagens": "Abordagens",
         "cadastradas": "Cadastradas", "confirmadas": "Confirmadas",
         "canceladas": "Canceladas", "conv_pct": "Conversao %",
-        "abord_pct": "Abordagem %", "campanhas": "Campanhas"})
+        "abord_pct": "Abordagem %", "campanhas": "Campanhas",
+        "operadores": "Operadores", "vendas_op": "Vendas/op"})
     hsty = show.style
     for gc in ["Cadastradas", "Conversao %"]:
         if gc in show.columns:

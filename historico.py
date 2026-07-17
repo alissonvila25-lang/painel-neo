@@ -8,6 +8,7 @@ script de snapshot diario (GitHub Action).
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 import numpy as np
 import pandas as pd
@@ -18,7 +19,7 @@ import treino
 from config import PROJETO
 
 
-def _agg_dia(perf: pd.DataFrame, dia: dt.date) -> dict | None:
+def _agg_dia(perf: pd.DataFrame, tmo: pd.DataFrame, dia: dt.date) -> dict | None:
     p = E.normalizar_performance(perf)
     if p.empty:
         return None
@@ -30,6 +31,12 @@ def _agg_dia(perf: pd.DataFrame, dia: dt.date) -> dict | None:
     conv = (100.0 * cad / abord) if abord > 0 else 0.0
     abpct = (100.0 * abord / lig) if lig > 0 else 0.0
     camp = int((p.get("Ligações", pd.Series(dtype=float)) > 0).sum())
+    # operadores que trabalharam no dia (TMO com matricula valida e ligacoes>0)
+    ops = 0
+    if tmo is not None and not tmo.empty and "Matrícula do Usuário" in tmo.columns:
+        _m = tmo["Matrícula do Usuário"].astype(str).str.strip()
+        _l = pd.to_numeric(tmo.get("Ligações"), errors="coerce").fillna(0)
+        ops = int(((_m.str.match(r"^\d{4,}$")) & (_l > 0)).sum())
     if lig <= 0 and cad <= 0:
         return None
     return {
@@ -37,7 +44,7 @@ def _agg_dia(perf: pd.DataFrame, dia: dt.date) -> dict | None:
         "ligacoes": int(lig), "abordagens": int(abord),
         "cadastradas": int(cad), "confirmadas": int(conf), "canceladas": int(canc),
         "conv_pct": round(conv, 2), "abord_pct": round(abpct, 2),
-        "campanhas": camp,
+        "campanhas": camp, "operadores": ops,
     }
 
 
@@ -48,12 +55,22 @@ def _portal():
     return pa, pid, g
 
 
+def _rels(pa, pid, g, dia):
+    perf = pa.fetch_relatorio(
+        pid, P.RELATORIOS[pid]["performance_operacao"], dia, dia, guids=g)
+    try:
+        tmo = pa.fetch_relatorio(
+            pid, P.RELATORIOS[pid]["tmo_operador"], dia, dia, guids=g)
+    except Exception:
+        tmo = pd.DataFrame()
+    return perf, tmo
+
+
 def snapshot(dia: dt.date) -> dict | None:
     """Coleta os totais de UM dia (para o cron / bootstrap manual)."""
     pa, pid, g = _portal()
-    perf = pa.fetch_relatorio(
-        pid, P.RELATORIOS[pid]["performance_operacao"], dia, dia, guids=g)
-    return _agg_dia(perf, dia)
+    perf, tmo = _rels(pa, pid, g, dia)
+    return _agg_dia(perf, tmo, dia)
 
 
 def atualizar_ate(dfim: dt.date, dias_janela: int = 60,
@@ -76,9 +93,8 @@ def atualizar_ate(dfim: dt.date, dias_janela: int = 60,
     rows = []
     for d in sorted(faltantes):
         try:
-            perf = pa.fetch_relatorio(
-                pid, P.RELATORIOS[pid]["performance_operacao"], d, d, guids=g)
-            r = _agg_dia(perf, d)
+            perf, tmo = _rels(pa, pid, g, d)
+            r = _agg_dia(perf, tmo, d)
             if r:
                 rows.append(r)
         except Exception:
@@ -87,17 +103,31 @@ def atualizar_ate(dfim: dt.date, dias_janela: int = 60,
 
 
 def preparar(hist: pd.DataFrame) -> pd.DataFrame:
-    """Normaliza o historico para exibicao (tipos + ordenacao)."""
+    """Normaliza o historico para exibicao (tipos + ordenacao).
+
+    As porcentagens sao RECALCULADAS a partir dos contadores (inteiros, imunes a
+    problemas de locale da planilha), corrigindo dados antigos gravados errado.
+    """
     if hist is None or hist.empty:
         return pd.DataFrame()
     d = hist.copy()
     d["data"] = pd.to_datetime(d["data"], errors="coerce")
     for c in ("ligacoes", "abordagens", "cadastradas", "confirmadas",
-              "canceladas", "conv_pct", "abord_pct", "campanhas"):
+              "canceladas", "conv_pct", "abord_pct", "campanhas", "operadores"):
         if c in d.columns:
             d[c] = pd.to_numeric(
                 d[c].astype(str).str.replace(",", ".", regex=False),
                 errors="coerce")
     d = d.dropna(subset=["data"]).sort_values("data")
     d = d.drop_duplicates("data", keep="last")
+    # recalcula % a partir dos contadores (robusto)
+    if {"cadastradas", "abordagens"} <= set(d.columns):
+        d["conv_pct"] = (100.0 * d["cadastradas"]
+                         / d["abordagens"].where(d["abordagens"] > 0)).round(1)
+    if {"abordagens", "ligacoes"} <= set(d.columns):
+        d["abord_pct"] = (100.0 * d["abordagens"]
+                          / d["ligacoes"].where(d["ligacoes"] > 0)).round(1)
+    if {"cadastradas", "operadores"} <= set(d.columns):
+        d["vendas_op"] = (d["cadastradas"]
+                          / d["operadores"].where(d["operadores"] > 0)).round(2)
     return d
