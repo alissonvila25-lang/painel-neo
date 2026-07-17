@@ -318,16 +318,25 @@ if _view == "📈 Historico":
     _sync_historico(_d1)
     h = historico.preparar(_historico())
 
-    cc = st.columns([3, 1])
+    cc = st.columns([3, 1, 1])
     cc[0].caption("Snapshot diario dos totais (Performance de Operacao). "
                   "Atualiza automaticamente olhando para D-1.")
     if cc[1].button("↻ Preencher 60 dias", use_container_width=True,
-                    help="Bootstrap: busca no portal os dias faltantes (pode demorar)."):
+                    help="Busca no portal os dias faltantes (pode demorar)."):
         with st.spinner("Coletando historico do portal…"):
             _nn = historico.atualizar_ate(_d1, dias_janela=60, max_fetch=60)
         _historico.clear()
         _sync_historico.clear()
         st.success(f"{_nn} dias adicionados ao historico.")
+        st.rerun()
+    if cc[2].button("🧹 Refazer", use_container_width=True,
+                    help="Limpa e recoleta os ultimos 60 dias (corrige formatos)."):
+        with st.spinner("Refazendo historico…"):
+            treino.limpar_historico()
+            _nn = historico.atualizar_ate(_d1, dias_janela=60, max_fetch=60)
+        _historico.clear()
+        _sync_historico.clear()
+        st.success(f"Historico refeito: {_nn} dias.")
         st.rerun()
 
     if h.empty:

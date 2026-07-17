@@ -333,9 +333,23 @@ def salvar_historico(rows: list[dict]) -> int:
         return 0
     try:
         vals = [[_cel(r.get(c)) for c in COLS_HIST] for r in rows]
-        ws.append_rows(vals, value_input_option="USER_ENTERED")
+        # RAW: evita a planilha (locale pt-BR) reinterpretar "3.88" como 388.
+        ws.append_rows(vals, value_input_option="RAW")
         return len(vals)
     except Exception:
         return 0
+
+
+def limpar_historico() -> bool:
+    """Zera a aba de historico (mantem o cabecalho). Para reprocessar."""
+    ws = _ws_named(_ABA_HIST, COLS_HIST)
+    if ws is None:
+        return False
+    try:
+        ws.clear()
+        ws.append_row(COLS_HIST)
+        return True
+    except Exception:
+        return False
 
 

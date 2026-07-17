@@ -95,7 +95,9 @@ def preparar(hist: pd.DataFrame) -> pd.DataFrame:
     for c in ("ligacoes", "abordagens", "cadastradas", "confirmadas",
               "canceladas", "conv_pct", "abord_pct", "campanhas"):
         if c in d.columns:
-            d[c] = pd.to_numeric(d[c], errors="coerce")
+            d[c] = pd.to_numeric(
+                d[c].astype(str).str.replace(",", ".", regex=False),
+                errors="coerce")
     d = d.dropna(subset=["data"]).sort_values("data")
     d = d.drop_duplicates("data", keep="last")
     return d
