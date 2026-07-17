@@ -1,0 +1,19 @@
+name: Keep-alive (evita o app dormir)
+
+on:
+  schedule:
+    - cron: "0 8,12,16,20 * * *"   # UTC (05,09,13,17 BRT)
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping do app
+        run: |
+          for url in \
+            "https://primeperformance.streamlit.app/" \
+            "https://primeperformance.streamlit.app/_stcore/health"; do
+            echo "GET $url"
+            curl -sSL --max-time 60 -o /dev/null -w "  status: %{http_code}\n" "$url" || true
+          done
