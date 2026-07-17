@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import re
 import calendar
@@ -89,21 +90,44 @@ from config import PROJETO, THRESHOLDS, now_br, today_br  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
-# Login opcional do painel (senha unica via secret/env NEO_PANEL_SENHA)
+# Login do painel: multiusuario via [credentials] (usuario -> senha), ou senha
+# unica via NEO_PANEL_SENHA (usuario 'admin'). Sem nada configurado -> aberto.
 # --------------------------------------------------------------------------- #
+def _load_credentials() -> dict:
+    try:
+        c = dict(st.secrets.get("credentials", {}))
+        if c:
+            return {str(k): str(v) for k, v in c.items()}
+    except Exception:
+        pass
+    raw = os.environ.get("NEO_CREDENTIALS", "")
+    if raw:
+        try:
+            return {str(k): str(v) for k, v in json.loads(raw).items()}
+        except Exception:
+            pass
+    s = os.environ.get("NEO_PANEL_SENHA", "")
+    return {"admin": s} if s else {}
+
+
 def _require_login():
-    senha = os.environ.get("NEO_PANEL_SENHA", "")
-    if not senha:
-        return  # sem senha configurada -> painel aberto
-    if st.session_state.get("neo_auth"):
+    creds = _load_credentials()
+    if not creds:
+        return  # sem credenciais -> painel aberto
+    if st.session_state.get("auth_user"):
         return
     st.title("⚡ Prime Performance")
     with st.form("login"):
+        u = st.text_input("Usuario")
         p = st.text_input("Senha", type="password")
-        if st.form_submit_button("Entrar") and hmac.compare_digest(p, senha):
-            st.session_state["neo_auth"] = True
-            st.rerun()
-    if not st.session_state.get("neo_auth"):
+        if st.form_submit_button("Entrar"):
+            exp = creds.get(u.strip())
+            if exp is not None and hmac.compare_digest(p, str(exp)):
+                st.session_state["auth_user"] = u.strip()
+                st.rerun()
+            else:
+                st.error("Usuario ou senha invalidos.")
+    if not st.session_state.get("auth_user"):
         st.stop()
 
 
@@ -291,9 +315,10 @@ thr["peso_expoente"] = float(_calp.get("peso_expoente", THRESHOLDS["peso_expoent
 if st.sidebar.button("🔄 Atualizar agora", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
-if os.environ.get("NEO_PANEL_SENHA") and st.session_state.get("neo_auth"):
+if st.session_state.get("auth_user"):
+    st.sidebar.caption(f"👤 {st.session_state['auth_user']}")
     if st.sidebar.button("🚪 Sair", use_container_width=True):
-        st.session_state.pop("neo_auth", None)
+        st.session_state.pop("auth_user", None)
         st.rerun()
 st.sidebar.caption("Fonte: Portal Ayty CRM (NEO ENERGIA)")
 
@@ -635,7 +660,7 @@ else:
                 rows.append({
                     "data": agora.strftime("%Y-%m-%d"),
                     "timestamp": agora.strftime("%H:%M:%S"),
-                    "avaliador": st.session_state.get("neo_auth") and "painel" or "local",
+                    "avaliador": st.session_state.get("auth_user") or "local",
                     "codigo": cod, "campanha": src.get("Campanha"),
                     "curva": src.get("Curva") or "",
                     "peso_config": src.get("Peso Config"),
