@@ -6,6 +6,7 @@ import json
 import os
 import re
 import calendar
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import pandas as pd
@@ -150,50 +151,44 @@ _require_login()
 
 
 # --------------------------------------------------------------------------- #
-# Carga de dados (cache 15 min)
+# Carga de dados (cache 15 min). Cada relatorio roda em sua PROPRIA sessao do
+# portal, em paralelo (o portal serializa requests da mesma sessao, entao 1
+# sessao por job e o que realmente acelera).
 # --------------------------------------------------------------------------- #
+def _job(fn):
+    """Abre uma sessao propria e executa fn(pa). DataFrame vazio em falha."""
+    try:
+        pa = P.PortalAyty().login()
+        return fn(pa)
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=900, show_spinner="Consultando o portal…")
-def carregar(di, dfim):
-    pa = P.PortalAyty().login()
-    g = pa.menu(P.PROJETOS_PORTAL[PROJETO])
+def carregar_campanhas(di, dfim):
+    """Performance + Discador + Config (o que a aba Campanhas precisa)."""
     pid = P.PROJETOS_PORTAL[PROJETO]
-
-    def rel(menu):
-        try:
-            return pa.fetch_relatorio(pid, menu, di, dfim, guids=g)
-        except Exception:
-            return pd.DataFrame()
-
-    perf = rel(P.RELATORIOS[pid]["performance_operacao"])
-    abc = rel(P.RELATORIOS[pid]["curva_abc_usuario"])
-    tmo = rel(P.RELATORIOS[pid]["tmo_operador"])
-    try:
-        disc = pa.estatisticas_discador(PROJETO, detalhado=True)
-    except Exception:
-        disc = pd.DataFrame()
-    try:
-        cfg = pa.config_campanha_grupo(PROJETO)
-    except Exception:
-        cfg = pd.DataFrame()
-    return perf, disc, cfg, abc, tmo
+    _r = P.RELATORIOS[pid]
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_perf = ex.submit(_job, lambda pa: pa.fetch_relatorio(
+            pid, _r["performance_operacao"], di, dfim))
+        f_disc = ex.submit(_job, lambda pa: pa.estatisticas_discador(
+            PROJETO, detalhado=True))
+        f_cfg = ex.submit(_job, lambda pa: pa.config_campanha_grupo(PROJETO))
+        return f_perf.result(), f_disc.result(), f_cfg.result()
 
 
 @st.cache_data(ttl=900, show_spinner="Consultando operadores…")
 def carregar_operadores_range(di, dfim):
     """Curva ABC + TMO por operador para um periodo proprio (aba Operadores)."""
-    pa = P.PortalAyty().login()
     pid = P.PROJETOS_PORTAL[PROJETO]
-    g = pa.menu(pid)
-
-    def rel(menu):
-        try:
-            return pa.fetch_relatorio(pid, menu, di, dfim, guids=g)
-        except Exception:
-            return pd.DataFrame()
-
-    abc = rel(P.RELATORIOS[pid]["curva_abc_usuario"])
-    tmo = rel(P.RELATORIOS[pid]["tmo_operador"])
-    return abc, tmo
+    _r = P.RELATORIOS[pid]
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_abc = ex.submit(_job, lambda pa: pa.fetch_relatorio(
+            pid, _r["curva_abc_usuario"], di, dfim))
+        f_tmo = ex.submit(_job, lambda pa: pa.fetch_relatorio(
+            pid, _r["tmo_operador"], di, dfim))
+        return f_abc.result(), f_tmo.result()
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -348,18 +343,6 @@ if not os.environ.get("AYTY_PORTAL_SENHA"):
     st.warning("Configure AYTY_PORTAL_USER e AYTY_PORTAL_SENHA (secrets) para "
                "conectar ao portal.")
     st.stop()
-
-try:
-    perf, disc, cfg, abc, tmo = carregar(dt_ini, dt_fim)
-except Exception as e:
-    st.error(f"Falha ao consultar o portal: {e}")
-    st.stop()
-
-df_camp, acoes = E.analisar(perf, disc, cfg, thr)
-if df_camp.empty:
-    st.info("Sem campanhas com dados no periodo.")
-    st.stop()
-kpi = E.resumo_kpis(df_camp)
 
 _view = st.radio("Visao", ["📊 Campanhas", "🧑‍💼 Operadores", "📈 Historico"],
                  horizontal=True, label_visibility="collapsed")
@@ -571,6 +554,17 @@ if _view == "🧑‍💼 Operadores":
     st.stop()
 
 # =========================== CAMPANHAS ===================================== #
+try:
+    perf, disc, cfg = carregar_campanhas(dt_ini, dt_fim)
+except Exception as e:
+    st.error(f"Falha ao consultar o portal: {e}")
+    st.stop()
+df_camp, acoes = E.analisar(perf, disc, cfg, thr)
+if df_camp.empty:
+    st.info("Sem campanhas com dados no periodo.")
+    st.stop()
+kpi = E.resumo_kpis(df_camp)
+
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 kpi_card(k1, "Ligacoes", _fmt(kpi["ligacoes"]), "discadas no periodo", "📞", "#3b82f6")
 kpi_card(k2, "Propostas Cadastradas", _fmt(kpi["cadastradas"]), "no periodo", "📝", "#22c55e")
