@@ -64,6 +64,9 @@ st.markdown(
       [data-testid="stDataFrame"] { border-radius:12px; overflow:hidden;
         border:1px solid #232a38; }
       [data-testid="stSidebar"] { background:#0b0e14; border-right:1px solid #1c2230; }
+      [data-testid="stForm"] { background:linear-gradient(160deg,#1b2130,#12161f);
+        border:1px solid #262d3d; border-radius:16px; padding:18px 20px;
+        box-shadow:0 10px 30px rgba(0,0,0,.4); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -116,19 +119,31 @@ def _require_login():
         return  # sem credenciais -> painel aberto
     if st.session_state.get("auth_user"):
         return
-    st.title("⚡ Prime Performance")
-    with st.form("login"):
-        u = st.text_input("Usuario")
-        p = st.text_input("Senha", type="password")
-        if st.form_submit_button("Entrar"):
+    st.markdown("<div style='height:7vh'></div>", unsafe_allow_html=True)
+    _, mid, _ = st.columns([1, 1.05, 1])
+    with mid:
+        st.markdown(
+            "<div style='text-align:center;margin-bottom:2px'>"
+            "<div style='font-size:2.8rem;line-height:1'>⚡</div>"
+            "<div style='font-size:1.55rem;font-weight:800;letter-spacing:.3px;"
+            "color:#f5f7fa'>Prime Performance</div>"
+            "<div style='color:#8b95a7;font-size:.82rem;margin-top:2px'>"
+            "Acesso restrito — entre com seu usuario</div></div>",
+            unsafe_allow_html=True)
+        with st.form("login"):
+            u = st.text_input("Usuario", placeholder="usuario",
+                              label_visibility="collapsed")
+            p = st.text_input("Senha", type="password", placeholder="senha",
+                              label_visibility="collapsed")
+            ok = st.form_submit_button("Entrar", use_container_width=True)
+        if ok:
             exp = creds.get(u.strip())
             if exp is not None and hmac.compare_digest(p, str(exp)):
                 st.session_state["auth_user"] = u.strip()
                 st.rerun()
             else:
                 st.error("Usuario ou senha invalidos.")
-    if not st.session_state.get("auth_user"):
-        st.stop()
+    st.stop()
 
 
 _require_login()
