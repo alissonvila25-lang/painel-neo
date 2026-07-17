@@ -15,6 +15,7 @@ if __name__ == "__main__":
     _h = treino.carregar_historico()
     print(f"[snapshot] historico existente: {len(_h)} linha(s)")
     d1 = today_br() - dt.timedelta(days=1)
-    # preenche qualquer dia faltante da ultima semana ate D-1 (robusto a falhas).
-    n = H.atualizar_ate(d1, dias_janela=7, max_fetch=7)
+    # preenche todos os dias faltantes ate D-1 (cobre o mes vigente e alguns a
+    # mais); o Action roda no servidor, entao pode buscar varios dias.
+    n = H.atualizar_ate(d1, dias_janela=40, max_fetch=40)
     print(f"[snapshot] {n} dia(s) adicionados ate {d1:%Y-%m-%d}")

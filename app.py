@@ -139,6 +139,24 @@ def carregar(di, dfim):
     return perf, disc, cfg, abc, tmo
 
 
+@st.cache_data(ttl=900, show_spinner="Consultando operadores…")
+def carregar_operadores_range(di, dfim):
+    """Curva ABC + TMO por operador para um periodo proprio (aba Operadores)."""
+    pa = P.PortalAyty().login()
+    pid = P.PROJETOS_PORTAL[PROJETO]
+    g = pa.menu(pid)
+
+    def rel(menu):
+        try:
+            return pa.fetch_relatorio(pid, menu, di, dfim, guids=g)
+        except Exception:
+            return pd.DataFrame()
+
+    abc = rel(P.RELATORIOS[pid]["curva_abc_usuario"])
+    tmo = rel(P.RELATORIOS[pid]["tmo_operador"])
+    return abc, tmo
+
+
 @st.cache_data(ttl=120, show_spinner=False)
 def _carregar_treino():
     return treino.carregar()
@@ -170,9 +188,9 @@ def _historico():
 
 @st.cache_data(ttl=1800, show_spinner="Atualizando historico (D-1)…")
 def _sync_historico(dref):
-    """Backfill leve: garante os dias recentes ate D-1 (max 3 por execucao)."""
+    """Backfill: garante os dias do mes vigente ate D-1 (ate 10 por execucao)."""
     try:
-        return historico.atualizar_ate(dref, dias_janela=60, max_fetch=3)
+        return historico.atualizar_ate(dref, dias_janela=40, max_fetch=10)
     except Exception:
         return 0
 
@@ -422,8 +440,22 @@ if _view == "📈 Historico":
 
 # =========================== OPERADORES ==================================== #
 if _view == "🧑‍💼 Operadores":
-    st.subheader("Operadores — producao e curva 🧑‍💼")
-    op = E.operadores(abc, tmo)
+    st.subheader("Operadores — producao 🧑‍💼")
+    oc1, oc2, oc3 = st.columns([1.2, 1, 1])
+    _modo_op = oc1.radio("Janela", ["Mes vigente", "Personalizado"],
+                         key="op_range_modo", label_visibility="collapsed")
+    if _modo_op == "Personalizado":
+        _op_ini = oc2.date_input("De", today_br().replace(day=1), key="op_de")
+        _op_fim = oc3.date_input("Ate", today_br(), key="op_ate")
+    else:
+        _op_ini = today_br().replace(day=1)
+        _op_fim = today_br()
+    if _op_ini > _op_fim:
+        st.warning("A data inicial nao pode ser maior que a final.")
+        st.stop()
+    st.caption(f"Periodo analisado: {_op_ini:%d/%m/%Y} a {_op_fim:%d/%m/%Y}")
+    _abc, _tmo = carregar_operadores_range(_op_ini, _op_fim)
+    op = E.operadores(_abc, _tmo)
     if op.empty:
         st.info("Sem dados de operadores no periodo.")
         st.stop()
@@ -431,6 +463,9 @@ if _view == "🧑‍💼 Operadores":
     v = op[op["Ligacoes"].fillna(0) >= _min].copy()
     v["Conv/Lig %"] = (100.0 * v["Cadastradas"]
                        / v["Ligacoes"].where(v["Ligacoes"] > 0)).round(1)
+    if "Dias" in v.columns:
+        v["Vendas/dia"] = (v["Cadastradas"]
+                           / v["Dias"].where(v["Dias"] > 0)).round(2)
     v = v.sort_values(["Cadastradas", "Conv/Lig %"], ascending=False).reset_index(drop=True)
     n = len(v)
     v.insert(0, "#", range(1, n + 1))
@@ -439,22 +474,26 @@ if _view == "🧑‍💼 Operadores":
     kpi_card(m1, "Operadores", f"{n}", f"min {_min} ligacoes", "🧑‍💼", "#8b5cf6")
     kpi_card(m2, "Cadastradas (total)", _fmt(int(v["Cadastradas"].sum())),
              "no periodo", "📝", "#22c55e")
-    kpi_card(m3, "Media cadastr./op", f"{v['Cadastradas'].mean():.1f}",
-             "por operador", "📊", "#38bdf8")
+    _md = (float(v["Vendas/dia"].mean()) if "Vendas/dia" in v.columns
+           and v["Vendas/dia"].notna().any() else v["Cadastradas"].mean())
+    kpi_card(m3, "Media vendas/op/dia", f"{_md:.1f}", "por dia trabalhado",
+             "📊", "#38bdf8")
     st.markdown("")
 
-    cols = ["#", "Nome", "Supervisor", "Ligacoes", "Cadastradas", "Conv/Lig %", "Dias"]
+    cols = ["#", "Nome", "Supervisor", "Ligacoes", "Cadastradas", "Vendas/dia",
+            "Conv/Lig %", "Dias"]
     show = v[[c for c in cols if c in v.columns]]
     sty = show.style
-    for gc in ["Cadastradas", "Conv/Lig %"]:
+    for gc in ["Cadastradas", "Vendas/dia", "Conv/Lig %"]:
         if gc in show.columns:
             sty = sty.apply(grad_col, subset=[gc], axis=0)
     sty = fmt_tabela(sty, show)
     st.dataframe(sty, use_container_width=True, hide_index=True, height=520)
     st.download_button("⬇️ Exportar (CSV)",
                        show.to_csv(index=False).encode("utf-8-sig"),
-                       f"operadores_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
-    st.caption("Ranking por producao (cadastradas) e conversao por ligacao no periodo.")
+                       f"operadores_neo_{_op_ini:%Y%m%d}_{_op_fim:%Y%m%d}.csv", "text/csv")
+    st.caption("Ranking por producao (cadastradas) no periodo. "
+               "Vendas/dia = cadastradas ÷ dias trabalhados.")
     st.stop()
 
 # =========================== CAMPANHAS ===================================== #
