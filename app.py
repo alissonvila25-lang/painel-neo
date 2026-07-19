@@ -164,18 +164,25 @@ def _job(fn):
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_cfg():
+    """Config de campanha (peso/curva) — muda pouco, cache de 1h."""
+    return _job(lambda pa: pa.config_campanha_grupo(PROJETO))
+
+
 @st.cache_data(ttl=900, show_spinner="Consultando o portal…")
 def carregar_campanhas(di, dfim):
-    """Performance + Discador + Config (o que a aba Campanhas precisa)."""
+    """Performance + Discador (paralelos) + Config (cache proprio de 1h)."""
     pid = P.PROJETOS_PORTAL[PROJETO]
     _r = P.RELATORIOS[pid]
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=2) as ex:
         f_perf = ex.submit(_job, lambda pa: pa.fetch_relatorio(
             pid, _r["performance_operacao"], di, dfim))
         f_disc = ex.submit(_job, lambda pa: pa.estatisticas_discador(
             PROJETO, detalhado=True))
-        f_cfg = ex.submit(_job, lambda pa: pa.config_campanha_grupo(PROJETO))
-        return f_perf.result(), f_disc.result(), f_cfg.result()
+        perf, disc = f_perf.result(), f_disc.result()
+    cfg = _carregar_cfg()   # geralmente cache HIT (instantaneo)
+    return perf, disc, cfg
 
 
 @st.cache_data(ttl=900, show_spinner="Consultando operadores…")
@@ -258,17 +265,26 @@ def grad_col(s):
 
 def fmt_tabela(styled, df):
     """'%' (1 casa) nas porcentagens; inteiros sem '.0'; 1 casa so quando ha
-    decimal; texto intacto; NA vira travessao."""
+    decimal; texto intacto; NA vira travessao. Tolerante a valores nao-numericos
+    (nao quebra a renderizacao)."""
+    def _mk(spec):
+        def _f(x):
+            try:
+                return spec.format(x)
+            except (ValueError, TypeError):
+                return "—" if pd.isna(x) else str(x)
+        return _f
+
     fmt = {}
     for c in df.columns:
-        if "%" in str(c):
-            fmt[c] = "{:.1f}%"
-            continue
         col = pd.to_numeric(df[c], errors="coerce")
         vals = col.dropna()
         if vals.empty:
             continue
-        fmt[c] = "{:.0f}" if (vals == vals.round(0)).all() else "{:.1f}"
+        if "%" in str(c):
+            fmt[c] = _mk("{:.1f}%")
+            continue
+        fmt[c] = _mk("{:.0f}" if (vals == vals.round(0)).all() else "{:.1f}")
     return styled.format(fmt, na_rep="\u2014")
 
 
@@ -392,9 +408,14 @@ if _view == "📈 Historico":
     abord_mes = float(_mes["abordagens"].sum())
     conv_mes = (100.0 * cad_mes / abord_mes) if abord_mes else 0.0
     cancel_pct = (100.0 * canc_mes / cad_mes) if cad_mes else 0.0
-    _mvop = (float(_mes["vendas_op"].mean())
-             if "vendas_op" in _mes.columns and _mes["vendas_op"].notna().any()
-             else 0.0)
+    # vendas por operador por dia = total de vendas / total de operador-dia,
+    # considerando SO os dias que tem contagem de operadores.
+    if "operadores" in _mes.columns:
+        _vd = _mes[_mes["operadores"].fillna(0) > 0]
+        _opdias = float(_vd["operadores"].sum())
+        _mvop = (float(_vd["cadastradas"].sum()) / _opdias) if _opdias > 0 else 0.0
+    else:
+        _mvop = 0.0
     _u = h.iloc[-1]
     _p = h.iloc[-2] if len(h) >= 2 else None
     _delta = (int(_u["cadastradas"] - _p["cadastradas"]) if _p is not None else None)
@@ -521,8 +542,8 @@ if _view == "🧑‍💼 Operadores":
     kpi_card(m1, "Operadores", f"{n}", f"min {_min} ligacoes", "🧑‍💼", "#8b5cf6")
     kpi_card(m2, "Cadastradas (total)", _fmt(int(v["Cadastradas"].sum())),
              "no periodo", "📝", "#22c55e")
-    _md = (float(v["Vendas/dia"].mean()) if "Vendas/dia" in v.columns
-           and v["Vendas/dia"].notna().any() else v["Cadastradas"].mean())
+    _totdias = float(v["Dias"].sum()) if "Dias" in v.columns else 0.0
+    _md = (float(v["Cadastradas"].sum()) / _totdias) if _totdias > 0 else 0.0
     kpi_card(m3, "Media vendas/op/dia", f"{_md:.1f}", "por dia trabalhado",
              "📊", "#38bdf8")
     kpi_card(m4, "Risco de queima", f"{_queima}", "operadores 🔥", "🔥", "#ff4b5c")
