@@ -219,6 +219,14 @@ def _cal_persist():
         return {}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _metas():
+    try:
+        return treino.carregar_metas()
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=43200, show_spinner="Carregando historico (D-1)…")
 def _hist_do_dia(d1):
     """Sincroniza ate D-1 e devolve o historico ja PREPARADO.
@@ -436,8 +444,21 @@ if _view == "📈 Historico":
     st.markdown("")
 
     # meta + projecao
+    _mes_key = f"{_hoje:%Y-%m}"
+    _meta_saved = int(_metas().get(_mes_key, 0))
     mc1, mc2, mc3 = st.columns(3)
-    meta = mc1.number_input("Meta mensal (cadastradas)", 0, 1_000_000, 0, 100)
+    meta = mc1.number_input("Meta mensal (cadastradas)", 0, 1_000_000,
+                            _meta_saved, 100,
+                            help="Fica salva para o mes vigente (vale para todos).")
+    if mc1.button("💾 Salvar meta", use_container_width=True,
+                  disabled=(int(meta) == _meta_saved)):
+        if treino.salvar_meta(_mes_key, int(meta),
+                              st.session_state.get("auth_user", "")):
+            _metas.clear()
+            st.toast(f"Meta de {_mes_key} salva: {int(meta)}")
+            st.rerun()
+        else:
+            st.warning("Nao consegui salvar a meta (verifique a planilha).")
     _dias_mes = calendar.monthrange(_hoje.year, _hoje.month)[1]
     _dias_dado = max(int(_mes["data"].dt.day.nunique()), 1)
     proj = cad_mes / _dias_dado * _dias_mes

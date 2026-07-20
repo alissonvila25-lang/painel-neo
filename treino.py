@@ -21,6 +21,8 @@ import os
 
 import pandas as pd
 
+from config import now_br
+
 # Planilha DEDICADA do NEO (reusa a mesma conta de servico do outro painel).
 # Pode ser sobrescrito por TREINO_SHEET_ID (secret/env).
 _SHEET_ID_DEFAULT = "1WsG0HuAMwgoqANEMgTslEE-_0_NRFdS1BMjAYBc6-mI"
@@ -324,6 +326,45 @@ def carregar_calibracao() -> dict:
                 out[k] = float(last.get(k))
             except (TypeError, ValueError):
                 pass
+        return out
+    except Exception:
+        return {}
+
+
+# --- meta mensal de cadastradas (persistida por mes AAAA-MM) ---
+_ABA_META = "meta_mensal_neo"
+COLS_META = ["mes", "meta", "timestamp", "avaliador"]
+
+
+def salvar_meta(mes: str, meta: int, avaliador: str = "") -> bool:
+    """Grava a meta de cadastradas para o mes AAAA-MM (ultima linha vence)."""
+    ws = _ws_named(_ABA_META, COLS_META)
+    if ws is None:
+        return False
+    try:
+        ts = now_br().strftime("%Y-%m-%d %H:%M:%S")
+        ws.append_row([_cel(mes), _cel(int(meta)), ts, _cel(avaliador)],
+                      value_input_option="USER_ENTERED")
+        return True
+    except Exception:
+        return False
+
+
+def carregar_metas() -> dict:
+    """Retorna {mes: meta} com a ultima meta gravada de cada mes."""
+    ws = _ws_named(_ABA_META, COLS_META)
+    if ws is None:
+        return {}
+    try:
+        out: dict[str, int] = {}
+        for r in ws.get_all_records():
+            m = str(r.get("mes") or "").strip()
+            if not m:
+                continue
+            try:
+                out[m] = int(float(r.get("meta")))
+            except (TypeError, ValueError):
+                continue
         return out
     except Exception:
         return {}
