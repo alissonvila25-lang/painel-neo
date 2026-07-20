@@ -143,11 +143,15 @@ def _ws_named(aba: str, cols: list[str]):
         import gspread
         sh = gc.open_by_key(_sheet_id())
         try:
-            return sh.worksheet(aba)
+            ws = sh.worksheet(aba)
         except gspread.WorksheetNotFound:
             ws = sh.add_worksheet(aba, rows=2000, cols=max(len(cols), 1))
             ws.append_row(cols)
             return ws
+        # aba ja existia: garante que o cabecalho tenha TODAS as colunas atuais
+        # (ex.: aba antiga sem "operadores" -> estende sem perder alinhamento).
+        _garantir_cabecalho(ws, cols)
+        return ws
     except Exception:
         return None
 

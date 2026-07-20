@@ -203,7 +203,7 @@ def _carregar_treino():
     return treino.carregar()
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def _status_treino():
     try:
         return treino.status()
@@ -219,21 +219,21 @@ def _cal_persist():
         return {}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _historico():
+@st.cache_data(ttl=43200, show_spinner="Carregando historico (D-1)…")
+def _hist_do_dia(d1):
+    """Sincroniza ate D-1 e devolve o historico ja PREPARADO.
+
+    Cacheado por data de D-1 (ttl 12h de seguranca) -> na pratica carrega uma
+    unica vez por dia e fica em memoria; nao rele a planilha a cada interacao.
+    """
     try:
-        return treino.carregar_historico()
+        historico.atualizar_ate(d1, dias_janela=40, max_fetch=10)
+    except Exception:
+        pass
+    try:
+        return historico.preparar(treino.carregar_historico())
     except Exception:
         return pd.DataFrame()
-
-
-@st.cache_data(ttl=1800, show_spinner="Atualizando historico (D-1)…")
-def _sync_historico(dref):
-    """Backfill: garante os dias do mes vigente ate D-1 (ate 10 por execucao)."""
-    try:
-        return historico.atualizar_ate(dref, dias_janela=40, max_fetch=10)
-    except Exception:
-        return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -372,8 +372,7 @@ if _view == "📈 Historico":
         st.info("Historico indisponivel — configure `TREINO_SHEET_ID` e "
                 "`GCP_SERVICE_ACCOUNT_JSON` nos secrets.")
         st.stop()
-    _sync_historico(_d1)
-    h = historico.preparar(_historico())
+    h = _hist_do_dia(_d1)
 
     cc = st.columns([3, 1, 1])
     cc[0].caption("Snapshot diario dos totais (Performance de Operacao). "
@@ -382,8 +381,7 @@ if _view == "📈 Historico":
                     help="Busca no portal os dias faltantes (pode demorar)."):
         with st.spinner("Coletando historico do portal…"):
             _nn = historico.atualizar_ate(_d1, dias_janela=60, max_fetch=60)
-        _historico.clear()
-        _sync_historico.clear()
+        _hist_do_dia.clear()
         st.success(f"{_nn} dias adicionados ao historico.")
         st.rerun()
     if cc[2].button("🧹 Refazer", use_container_width=True,
@@ -391,8 +389,7 @@ if _view == "📈 Historico":
         with st.spinner("Refazendo historico…"):
             treino.limpar_historico()
             _nn = historico.atualizar_ate(_d1, dias_janela=60, max_fetch=60)
-        _historico.clear()
-        _sync_historico.clear()
+        _hist_do_dia.clear()
         st.success(f"Historico refeito: {_nn} dias.")
         st.rerun()
 
