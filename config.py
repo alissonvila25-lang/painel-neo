@@ -30,5 +30,5 @@ THRESHOLDS: dict[str, float] = {
     # calibracao do peso sugerido
     "peso_ramp_frac": 0.4,
     "peso_ramp_min": 3,
-    "peso_expoente": 0.6,
+    "peso_expoente": 1.2,   # >1 faz a CONVERSAO mandar (nao so reverter a media)
 }
