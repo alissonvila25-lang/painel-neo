@@ -157,9 +157,10 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
         disp_pct = (100.0 * disp / total_base) if total_base > 0 else np.nan
         peso_cfg = r.get("Peso Config")
         peso_disc = r.get("Peso Disc")
-        # No NEO o peso REAL que roda e o do DISCADOR; a config de campanha quase
-        # nunca vem preenchida -> discador tem prioridade como referencia.
-        peso_ref = peso_disc if pd.notna(peso_disc) else peso_cfg
+        # Peso Config (intencao do analista) e Peso Disc (o que roda) costumam
+        # ser iguais. Usa-se o Config como referencia quando existe; cai para o
+        # Disc quando a campanha ainda nao tem config (ex.: DEFAULT).
+        peso_ref = peso_cfg if pd.notna(peso_cfg) else peso_disc
         tem_peso = pd.notna(peso_ref)
         _cv = r.get("Curva")
         if not (isinstance(_cv, str) and _cv.strip()):

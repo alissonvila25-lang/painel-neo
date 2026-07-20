@@ -436,12 +436,10 @@ class PortalAyty:
             alterado_por = self._txt_value(block, 24)
             if not campanha:
                 continue
-            cod = ""
-            for tdm in re.finditer(r'<td[^>]*>(.*?)</td>', block, re.S):
-                t = re.sub(r"<[^>]+>", "", tdm.group(1)).strip()
-                if t.isdigit():
-                    cod = t
-                    break
+            # O codigo REAL da campanha vem do nome ("000024 - ..." -> 24), NAO
+            # do primeiro <td> numerico (que e o ID sequencial da linha do grid).
+            mcod = re.match(r"\s*0*(\d+)", campanha)
+            cod = mcod.group(1) if mcod else ""
             cm = _CURVA_RE.search(grupo)
             registros.append({
                 "Projeto": projeto,
