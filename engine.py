@@ -299,6 +299,11 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict) -> pd.Series:
             vf = min(1.2, max(0.85, (max(float(disp_abs.loc[i]), 1.0) / vol_med) ** 0.25))
             merit[i] = cvc * vf
         soma = sum(merit.values()) or 1.0
+        # mediana de conversao do grupo: campanha ABAIXO dela nao pode subir de
+        # peso (so manter/cair) — evita premiar quem converte pouco so por estar
+        # subponderado.
+        _cvs = [float(conv.loc[i]) for i in idx if pd.notna(conv.loc[i])]
+        conv_med = float(pd.Series(_cvs).median()) if _cvs else 0.0
         for i in idx:
             alvo = int(round(min(max(budget * merit[i] / soma, 1), teto)))
             atual = int(ref.loc[i])
@@ -306,7 +311,10 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict) -> pd.Series:
             alvo = min(alvo, atual + step)
             alvo = max(alvo, atual - step)
             cvv = conv.loc[i]
-            if pd.notna(cvv) and float(cvv) < cb and alvo > atual:
+            # trava de subida: conversao ruim (< conv_baixa) OU abaixo da mediana
+            # do grupo -> nao aumenta o peso.
+            if alvo > atual and pd.notna(cvv) and (
+                    float(cvv) < cb or float(cvv) < conv_med):
                 alvo = atual
             out.at[i] = alvo
     # fallback: toda campanha com peso de referencia recebe uma sugestao (fora
