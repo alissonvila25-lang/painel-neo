@@ -33,6 +33,9 @@ COLS = [
     "disp_abs", "disp_pct", "rodando", "obs",
 ]
 
+# ultimo erro de gravacao (para o painel mostrar o motivo real)
+_ERRO_SALVAR = ""
+
 
 def _sheet_id() -> str:
     return (_find_secret_str("TREINO_SHEET_ID") or "").strip() or _SHEET_ID_DEFAULT
@@ -212,17 +215,22 @@ def status() -> tuple[bool, str]:
 
 def salvar(rows: list[dict]) -> int:
     """Anexa avaliacoes. Retorna quantas linhas gravou (0 em falha)."""
+    global _ERRO_SALVAR
+    _ERRO_SALVAR = ""
     if not rows:
         return 0
     ws = _ws()
     if ws is None:
+        _ERRO_SALVAR = ("nao abriu a planilha — verifique GCP_SERVICE_ACCOUNT_JSON "
+                        "e o compartilhamento (Editor) com o client_email")
         return 0
     try:
         _garantir_cabecalho(ws, COLS)
         valores = [[_cel(r.get(c)) for c in COLS] for r in rows]
         ws.append_rows(valores, value_input_option="USER_ENTERED")
         return len(valores)
-    except Exception:
+    except Exception as e:
+        _ERRO_SALVAR = f"{type(e).__name__}: {e}"
         return 0
 
 
@@ -259,11 +267,21 @@ def salvar_log(rows: list[dict]) -> int:
 
 
 def _cel(v):
-    """Normaliza valor para celula (evita NaN/None virando 'nan')."""
+    """Normaliza valor para celula: numpy/pandas -> nativo (json-serializavel);
+    NaN/None -> ''. Sem isso, valores vindos do DataFrame (np.int64/np.float64)
+    quebram o append_rows (nao sao JSON-serializaveis)."""
     if v is None:
         return ""
-    if isinstance(v, float) and pd.isna(v):
-        return ""
+    if hasattr(v, "item") and not isinstance(v, (str, bytes)):
+        try:
+            v = v.item()
+        except Exception:
+            pass
+    try:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+    except Exception:
+        pass
     return v
 
 

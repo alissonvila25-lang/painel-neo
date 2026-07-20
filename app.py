@@ -742,7 +742,9 @@ else:
                 _carregar_treino.clear()
                 st.success(f"✅ {n} avaliacoes salvas.")
             else:
-                st.error("Nao consegui salvar — verifique credenciais/planilha.")
+                _err = getattr(treino, "_ERRO_SALVAR", "")
+                st.error("Nao consegui salvar — verifique credenciais/planilha."
+                         + (f"\n\nDetalhe: {_err}" if _err else ""))
 
         # ---- Auto-calibracao ----
         with st.expander("🤖 Auto-calibracao (aprende com as avaliacoes)"):
