@@ -1,0 +1,25 @@
+name: Pre-aquecimento (cache quente)
+
+on:
+  schedule:
+    - cron: "0 9,11,15,17 * * *"   # UTC (06,08,12,14 BRT) - inicio dos turnos
+  workflow_dispatch: {}
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Instalar Playwright
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Aquecer o app
+        env:
+          APP_URL: "https://primeperformance.streamlit.app/"
+          PANEL_USER: ${{ secrets.PANEL_USER }}
+          PANEL_PASS: ${{ secrets.PANEL_PASS }}
+        run: python warm.py
