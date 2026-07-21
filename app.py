@@ -785,7 +785,8 @@ else:
         # ---- Copiloto de calibragem (IA) ----
         with st.expander("🤝 Copiloto de calibragem (IA)"):
             if not iacop.disponivel():
-                st.caption("IA indisponivel — configure `ANTHROPIC_API_KEY` nos "
+                st.caption("IA indisponivel — configure `GITHUB_MODELS_TOKEN` "
+                           "(GitHub Models, gratis) ou `ANTHROPIC_API_KEY` nos "
                            "secrets para ativar o chat de calibragem.")
             else:
                 _LOGICA = (
