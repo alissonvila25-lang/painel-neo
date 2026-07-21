@@ -90,6 +90,7 @@ import engine as E          # noqa: E402
 import treino               # noqa: E402
 import calibracao as calib  # noqa: E402
 import historico            # noqa: E402
+import ia_copiloto as iacop  # noqa: E402
 from config import PROJETO, THRESHOLDS, now_br, today_br  # noqa: E402
 
 
@@ -770,7 +771,7 @@ else:
                     "disp_abs": src.get("Disponiveis"),
                     "disp_pct": src.get("Disponivel %"),
                     "rodando": bool(src.get("Rodando")),
-                    "obs": "",
+                    "obs": st.session_state.get("_racional_neo", {}).get(cod, ""),
                 })
             n = treino.salvar(rows)
             if n:
@@ -780,6 +781,75 @@ else:
                 _err = getattr(treino, "_ERRO_SALVAR", "")
                 st.error("Nao consegui salvar — verifique credenciais/planilha."
                          + (f"\n\nDetalhe: {_err}" if _err else ""))
+
+        # ---- Copiloto de calibragem (IA) ----
+        with st.expander("🤝 Copiloto de calibragem (IA)"):
+            if not iacop.disponivel():
+                st.caption("IA indisponivel — configure `ANTHROPIC_API_KEY` nos "
+                           "secrets para ativar o chat de calibragem.")
+            else:
+                _LOGICA = (
+                    "O Peso Sugerido redistribui o peso TOTAL do grupo entre as "
+                    "campanhas ativas por MERITO. Merito = conversao^expoente "
+                    f"(expoente {thr.get('peso_expoente', 1.2):.2f}, >1 faz a conversao "
+                    "mandar) x fator de volume ENXUTO (base disponivel, faixa "
+                    "0.85-1.2, so desempate). Orcamento fixo => campanha muito acima "
+                    "da media cai, muito abaixo sobe (reversao a media). Travas: "
+                    "(1) conversao < conv_baixa nao sobe; (2) conversao ABAIXO da "
+                    "mediana do grupo nao sobe; (3) rampa limita o passo por rodada; "
+                    "(4) teto = maior peso do grupo x1.2.")
+                _cods = base_tr["Codigo"].astype(int).tolist()
+                _sel = st.selectbox(
+                    "Campanha para discutir", _cods,
+                    format_func=lambda c: base_tr[base_tr["Codigo"] == c]
+                    ["Campanha"].iloc[0], key="iacop_sel_neo")
+                _src = base_tr[base_tr["Codigo"] == _sel].iloc[0]
+                try:
+                    _ideal = edited[edited["Codigo"] == _sel]["Peso Ideal"].iloc[0]
+                except Exception:
+                    _ideal = _src.get("Peso Sugerido")
+                _info = {
+                    "Campanha": _src.get("Campanha"),
+                    "Conversao %": _src.get("% Conversao"),
+                    "% Abordagem": _src.get("% Abordagem"),
+                    "Ligacoes": _src.get("Ligacoes"),
+                    "Cadastradas": _src.get("Cadastradas"),
+                    "Base disponivel (abs)": _src.get("Disponiveis"),
+                    "Base disponivel %": _src.get("Disponivel %"),
+                    "Peso atual (discador)": _src.get("Peso Disc"),
+                    "Peso sugerido": _src.get("Peso Sugerido"),
+                    "Peso ideal do analista": _ideal,
+                }
+                st.caption(
+                    f"Conv **{_info['Conversao %']}%** · base disp **{_info['Base disponivel %']}%** "
+                    f"· atual **{_info['Peso atual (discador)']}** · sugerido "
+                    f"**{_info['Peso sugerido']}** · seu ideal **{_ideal}**")
+                _ck = f"_chat_neo_{_sel}"
+                _msgs = st.session_state.setdefault(_ck, [])
+                for _m in _msgs:
+                    with st.chat_message("user" if _m["role"] == "user" else "assistant"):
+                        st.markdown(_m["content"])
+                _txt = st.text_area(
+                    "Explique por que mudaria (ou pergunte à IA)",
+                    key=f"iacop_in_{_sel}", height=80,
+                    placeholder="Ex.: quero subir o peso mesmo com conversao menor "
+                                "porque a base esta fresca e vai maturar…")
+                b1, b2 = st.columns([1, 1])
+                if b1.button("💬 Enviar", use_container_width=True,
+                             key=f"iacop_send_{_sel}", disabled=not _txt.strip()):
+                    _msgs.append({"role": "user", "content": _txt.strip()})
+                    with st.spinner("Consultando a IA…"):
+                        _r = iacop.responder(_msgs, _info, _LOGICA)
+                    _msgs.append({"role": "assistant", "content": _r})
+                    st.rerun()
+                if b2.button("💾 Usar raciocinio na avaliacao", use_container_width=True,
+                             key=f"iacop_obs_{_sel}", disabled=not _msgs):
+                    st.session_state.setdefault("_racional_neo", {})[int(_sel)] = \
+                        iacop.resumo_racional(_msgs)
+                    st.toast("Raciocinio vinculado — clique em Salvar avaliacao para gravar.")
+                if _msgs and st.button("🧹 Limpar conversa", key=f"iacop_clr_{_sel}"):
+                    st.session_state[_ck] = []
+                    st.rerun()
 
         # ---- Auto-calibracao ----
         with st.expander("🤖 Auto-calibracao (aprende com as avaliacoes)"):

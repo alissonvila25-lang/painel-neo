@@ -5,3 +5,4 @@ requests>=2.31
 plotly>=6.8
 gspread>=6.0
 google-auth>=2.30
+anthropic>=0.40
