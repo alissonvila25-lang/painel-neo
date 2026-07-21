@@ -69,20 +69,18 @@ st.markdown(
         border:1px solid #262d3d; border-radius:16px; padding:18px 20px;
         box-shadow:0 10px 30px rgba(0,0,0,.4); }
       /* Copiloto de calibragem (IA) — borda azul tecnologica */
-      #copiloto-ia-marker + div [data-testid="stExpander"],
-      #copiloto-ia-marker ~ div [data-testid="stExpander"]:first-of-type {
+      /* :has() funciona no Chrome 105+, Safari 15.4+, Firefox 121+ */
+      [data-testid="stExpander"]:has(.copiloto-ia-inside) {
         border: 1px solid transparent !important;
         border-radius: 14px !important;
         background:
           linear-gradient(#12161f, #12161f) padding-box,
           linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #38bdf8 100%) border-box !important;
-        box-shadow: 0 0 18px rgba(56,189,248,.13), inset 0 0 0 1px rgba(56,189,248,.07);
+        box-shadow: 0 0 18px rgba(56,189,248,.13);
         transition: box-shadow .3s ease;
-        margin-bottom: 6px;
       }
-      #copiloto-ia-marker + div [data-testid="stExpander"]:hover,
-      #copiloto-ia-marker ~ div [data-testid="stExpander"]:first-of-type:hover {
-        box-shadow: 0 0 30px rgba(56,189,248,.25), inset 0 0 0 1px rgba(129,140,248,.2);
+      [data-testid="stExpander"]:has(.copiloto-ia-inside):hover {
+        box-shadow: 0 0 32px rgba(56,189,248,.26), 0 0 2px rgba(129,140,248,.3);
       }
     </style>
     """,
@@ -799,8 +797,9 @@ else:
                          + (f"\n\nDetalhe: {_err}" if _err else ""))
 
         # ---- Copiloto de calibragem (IA) ----
-        st.markdown('<div id="copiloto-ia-marker"></div>', unsafe_allow_html=True)
         with st.expander("🤝 Copiloto de calibragem (IA)"):
+            # marcador interno: CSS :has(.copiloto-ia-inside) identifica este expander
+            st.markdown('<div class="copiloto-ia-inside"></div>', unsafe_allow_html=True)
             if not iacop.disponivel():
                 st.caption("IA indisponivel — configure `GITHUB_MODELS_TOKEN` "
                            "(GitHub Models, gratis) ou `ANTHROPIC_API_KEY` nos "
