@@ -68,6 +68,22 @@ st.markdown(
       [data-testid="stForm"] { background:linear-gradient(160deg,#1b2130,#12161f);
         border:1px solid #262d3d; border-radius:16px; padding:18px 20px;
         box-shadow:0 10px 30px rgba(0,0,0,.4); }
+      /* Copiloto de calibragem (IA) — borda azul tecnologica */
+      #copiloto-ia-marker + div [data-testid="stExpander"],
+      #copiloto-ia-marker ~ div [data-testid="stExpander"]:first-of-type {
+        border: 1px solid transparent !important;
+        border-radius: 14px !important;
+        background:
+          linear-gradient(#12161f, #12161f) padding-box,
+          linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #38bdf8 100%) border-box !important;
+        box-shadow: 0 0 18px rgba(56,189,248,.13), inset 0 0 0 1px rgba(56,189,248,.07);
+        transition: box-shadow .3s ease;
+        margin-bottom: 6px;
+      }
+      #copiloto-ia-marker + div [data-testid="stExpander"]:hover,
+      #copiloto-ia-marker ~ div [data-testid="stExpander"]:first-of-type:hover {
+        box-shadow: 0 0 30px rgba(56,189,248,.25), inset 0 0 0 1px rgba(129,140,248,.2);
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -783,6 +799,7 @@ else:
                          + (f"\n\nDetalhe: {_err}" if _err else ""))
 
         # ---- Copiloto de calibragem (IA) ----
+        st.markdown('<div id="copiloto-ia-marker"></div>', unsafe_allow_html=True)
         with st.expander("🤝 Copiloto de calibragem (IA)"):
             if not iacop.disponivel():
                 st.caption("IA indisponivel — configure `GITHUB_MODELS_TOKEN` "
