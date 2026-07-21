@@ -132,3 +132,51 @@ def resumo_racional(mensagens: list[dict], limite: int = 500) -> str:
              if m.get("role") == "user" and m.get("content")]
     txt = " | ".join(falas)
     return (txt[:limite] + "…") if len(txt) > limite else txt
+
+
+_PROMPT_AJUSTES = """\
+Com base na conversa acima, extraia APENAS os ajustes de peso que o ANALISTA pediu \
+claramente, no formato JSON a seguir:
+[{"codigo":<int>,"campanha":"<nome>","bias":<float>,"motivo":"<max 80 chars>"}]
+
+Regras:
+- bias e um MULTIPLICADOR de merito: 1.0=neutro, 1.4=+40%% (quer MAIS peso), 0.7=-30%% (quer MENOS).
+- Inclua SO campanhas onde o analista pediu algo DIFERENTE da sugestao automatica.
+- Se ele concordou com a sugestao ou nao fez pedido claro, NAO inclua.
+- Retorne APENAS o JSON (lista). Sem texto antes ou depois. Se nao houver ajustes, retorne [].
+"""
+
+
+def extrair_ajustes(mensagens: list[dict], info: dict) -> list[dict]:
+    """Extrai ajustes estruturados {codigo, campanha, bias, motivo} da conversa.
+    Usa a IA pra parsear o raciocinio e retorna lista (pode ser vazia)."""
+    import json, re
+    prov = _provider()
+    if not prov:
+        return []
+    sistema = f"{SYSTEM}\n\n{_contexto(info)}"
+    msgs = list(mensagens) + [{"role": "user", "content": _PROMPT_AJUSTES}]
+    try:
+        if prov == "github":
+            resp = _resp_github(sistema, msgs)
+        else:
+            resp = _resp_anthropic(sistema, msgs)
+        m = re.search(r"\[.*?\]", resp, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            # valida e normaliza
+            out = []
+            for item in data:
+                try:
+                    out.append({
+                        "codigo": int(item["codigo"]),
+                        "campanha": str(item.get("campanha", "")),
+                        "bias": float(item.get("bias", 1.0)),
+                        "motivo": str(item.get("motivo", ""))[:100],
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
+            return out
+    except Exception:
+        pass
+    return []

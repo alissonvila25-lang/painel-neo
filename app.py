@@ -242,6 +242,15 @@ def _metas():
         return {}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _ajustes_cache():
+    """Ajustes de bias extraidos pela IA (janela 7 dias)."""
+    try:
+        return treino.carregar_ajustes(janela_dias=7)
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=43200, show_spinner="Carregando historico (D-1)…")
 def _hist_do_dia(d1):
     """Sincroniza ate D-1 e devolve o historico ja PREPARADO.
@@ -630,7 +639,10 @@ try:
 except Exception as e:
     st.error(f"Falha ao consultar o portal: {e}")
     st.stop()
-df_camp, acoes = E.analisar(perf, disc, cfg, thr)
+_aj = _ajustes_cache()
+_biases = (dict(zip(_aj["codigo"].astype(int), _aj["bias"].astype(float)))
+           if not _aj.empty else {})
+df_camp, acoes = E.analisar(perf, disc, cfg, thr, biases=_biases)
 if df_camp.empty:
     st.info("Sem campanhas com dados no periodo.")
     st.stop()
@@ -868,6 +880,60 @@ else:
                              key="iacop_clr_neo", disabled=not _msgs):
                     st.session_state[_ck] = []
                     st.rerun()
+
+                # ---- Extrair ajustes para o algoritmo ----
+                st.markdown("---")
+                st.caption("**📐 Ajustes para o algoritmo** — a IA extrai da conversa "
+                           "um bias por campanha que é aplicado nas próximas sugestões "
+                           "de peso (janela de 7 dias).")
+                if st.button("📐 Extrair ajustes da conversa", use_container_width=True,
+                             key="iacop_extract_neo", disabled=not _msgs):
+                    with st.spinner("Extraindo ajustes estruturados…"):
+                        _info_ext = {"Campanhas do filtro (atual/sugerido/ideal)":
+                                     "\n" + _tabela}
+                        _ajst = iacop.extrair_ajustes(_msgs, _info_ext)
+                    if not _ajst:
+                        st.warning("A IA não encontrou ajustes claros na conversa.")
+                    else:
+                        st.session_state["_ajustes_preview_neo"] = _ajst
+                _prev = st.session_state.get("_ajustes_preview_neo")
+                if _prev:
+                    st.markdown("**Preview dos ajustes extraídos:**")
+                    for _a in _prev:
+                        _dir = "⬆️" if _a["bias"] > 1.0 else ("⬇️" if _a["bias"] < 1.0 else "➡️")
+                        st.markdown(f"{_dir} **{_a['campanha']}** — bias `{_a['bias']:.2f}` "
+                                    f"({'+' if _a['bias'] >= 1 else ''}"
+                                    f"{(_a['bias']-1)*100:.0f}%) · _{_a['motivo']}_")
+                    if st.button("💾 Aplicar ajustes ao algoritmo", use_container_width=True,
+                                 key="iacop_save_ajust_neo"):
+                        _rows = [{
+                            "data": now_br().strftime("%Y-%m-%d"),
+                            "timestamp": now_br().strftime("%H:%M:%S"),
+                            "avaliador": st.session_state.get("auth_user", ""),
+                            "codigo": _a["codigo"], "campanha": _a["campanha"],
+                            "bias": _a["bias"], "motivo": _a["motivo"],
+                        } for _a in _prev]
+                        if treino.salvar_ajustes(_rows):
+                            _ajustes_cache.clear()
+                            st.session_state.pop("_ajustes_preview_neo", None)
+                            st.success(f"✅ {len(_rows)} ajuste(s) aplicado(s) — "
+                                       "as próximas sugestões já consideram o seu raciocínio.")
+                            st.rerun()
+                        else:
+                            st.error("Não consegui salvar os ajustes.")
+
+                # ---- Biases ativos (influenciando agora) ----
+                if not _aj.empty:
+                    st.markdown("**🔵 Ajustes ativos** (aplicados às sugestões atuais):")
+                    for _, _row in _aj.iterrows():
+                        _dir = "⬆️" if _row["bias"] > 1.0 else ("⬇️" if _row["bias"] < 1.0 else "➡️")
+                        st.caption(f"{_dir} cód {int(_row['codigo'])} · "
+                                   f"bias `{_row['bias']:.2f}` · _{_row.get('motivo','')}_")
+                    if st.button("🗑️ Limpar ajustes ativos", key="iacop_clear_ajust_neo"):
+                        treino.limpar_ajustes()
+                        _ajustes_cache.clear()
+                        st.rerun()
+
                 _stt = iacop.ultimo_status()
                 if _stt.get("remaining") is not None:
                     st.caption(f"🔋 Requisições restantes hoje (GitHub Models): "

@@ -123,7 +123,8 @@ def normalizar_config(df: pd.DataFrame) -> pd.DataFrame:
 # Analise
 # --------------------------------------------------------------------------- #
 def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
-             thr: dict | None = None) -> tuple[pd.DataFrame, list[dict]]:
+             thr: dict | None = None,
+             biases: dict | None = None) -> tuple[pd.DataFrame, list[dict]]:
     thr = thr or THRESHOLDS
     p = normalizar_performance(perf)
     if p.empty:
@@ -256,7 +257,7 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
 
     df_camp = pd.DataFrame(reg)
     if not df_camp.empty:
-        df_camp["Peso Sugerido"] = _sugerir_pesos(df_camp, thr)
+        df_camp["Peso Sugerido"] = _sugerir_pesos(df_camp, thr, biases=biases)
         df_camp = _reconciliar_coerencia(df_camp)
         df_camp = df_camp.sort_values(["Score", "Ligacoes"], ascending=[True, False])
     sev_ord = {"CRITICO": 0, "ATENCAO": 1, "OPORTUNIDADE": 2, "INFO": 3}
@@ -264,9 +265,13 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
     return df_camp, acoes
 
 
-def _sugerir_pesos(df: pd.DataFrame, thr: dict) -> pd.Series:
+def _sugerir_pesos(df: pd.DataFrame, thr: dict,
+                   biases: dict | None = None) -> pd.Series:
     """Redistribui o peso total da curva entre campanhas ativas por merito
-    (conversao comprimida x base disponivel). Simplificado: sem base virgem."""
+    (conversao comprimida x base disponivel). biases={codigo:multiplicador}
+    aplicado ao merito ANTES da redistribuicao; bias>1 tambem relaxa a trava
+    de mediana (humano decidiu subir intencionalmente)."""
+    _bias = biases or {}
     n = len(df)
     out = pd.Series([None] * n, index=df.index, dtype="object")
     ref = pd.to_numeric(df.get("Peso Disc"), errors="coerce")
@@ -291,13 +296,17 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict) -> pd.Series:
         vol_med = float(pd.Series([max(float(disp_abs.loc[i]), 0.0)
                                    for i in idx]).median()) or 1.0
         merit = {}
+        _cods = {i: int(df.at[i, "Codigo"]) if "Codigo" in df.columns else 0
+                 for i in idx}
         for i in idx:
             cv = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
             cvc = max(cv, 0.1) ** exp
             # fator volume ENXUTO (0.85-1.2): a base disponivel e' so um leve
             # desempate; quem manda e' a conversao (cvc).
             vf = min(1.2, max(0.85, (max(float(disp_abs.loc[i]), 1.0) / vol_med) ** 0.25))
-            merit[i] = cvc * vf
+            # aplica bias do analista (extraido da conversa com a IA)
+            b = float(_bias.get(_cods[i], 1.0))
+            merit[i] = cvc * vf * b
         soma = sum(merit.values()) or 1.0
         # mediana de conversao do grupo: campanha ABAIXO dela nao pode subir de
         # peso (so manter/cair) — evita premiar quem converte pouco so por estar
@@ -313,8 +322,11 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict) -> pd.Series:
             cvv = conv.loc[i]
             # trava de subida: conversao ruim (< conv_baixa) OU abaixo da mediana
             # do grupo -> nao aumenta o peso.
+            # EXCECAO: bias > 1.0 significa que o analista decidiu subir
+            # intencionalmente (via copiloto IA) -> relaxa a trava.
+            b = float(_bias.get(_cods[i], 1.0))
             if alvo > atual and pd.notna(cvv) and (
-                    float(cvv) < cb or float(cvv) < conv_med):
+                    float(cvv) < cb or float(cvv) < conv_med) and b <= 1.0:
                 alvo = atual
             out.at[i] = alvo
     # fallback: toda campanha com peso de referencia recebe uma sugestao (fora

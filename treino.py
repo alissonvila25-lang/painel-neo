@@ -331,6 +331,65 @@ def carregar_calibracao() -> dict:
         return {}
 
 
+# --- ajustes de peso extraidos pela IA da conversa de calibragem ---
+_ABA_AJUST = "ajustes_peso_neo"
+COLS_AJUST = ["data", "timestamp", "avaliador", "codigo", "campanha", "bias", "motivo"]
+
+
+def salvar_ajustes(rows: list[dict]) -> int:
+    """Salva ajustes de bias por campanha. Retorna quantos gravou."""
+    if not rows:
+        return 0
+    ws = _ws_named(_ABA_AJUST, COLS_AJUST)
+    if ws is None:
+        return 0
+    try:
+        vals = [[_cel(r.get(c)) for c in COLS_AJUST] for r in rows]
+        ws.append_rows(vals, value_input_option="USER_ENTERED")
+        return len(vals)
+    except Exception:
+        return 0
+
+
+def carregar_ajustes(janela_dias: int = 7) -> pd.DataFrame:
+    """Ajuste mais recente por campanha dentro da janela de dias.
+    Retorna df com colunas [codigo(int), bias(float), motivo, avaliador]."""
+    ws = _ws_named(_ABA_AJUST, COLS_AJUST)
+    if ws is None:
+        return pd.DataFrame()
+    try:
+        df = pd.DataFrame(ws.get_all_records())
+        if df.empty or "data" not in df.columns:
+            return pd.DataFrame()
+        df["data"] = pd.to_datetime(df["data"], errors="coerce")
+        corte = pd.Timestamp.now() - pd.Timedelta(days=janela_dias)
+        df = df[df["data"] >= corte]
+        df["bias"] = pd.to_numeric(df["bias"], errors="coerce").fillna(1.0)
+        df["codigo"] = pd.to_numeric(df["codigo"], errors="coerce")
+        df = df.dropna(subset=["codigo"])
+        df["codigo"] = df["codigo"].astype(int)
+        if df.empty:
+            return pd.DataFrame()
+        # mantém só o mais recente por campanha
+        df = df.sort_values("data").groupby("codigo").tail(1).reset_index(drop=True)
+        return df[["codigo", "bias", "motivo", "avaliador", "campanha"]]
+    except Exception:
+        return pd.DataFrame()
+
+
+def limpar_ajustes() -> bool:
+    """Apaga todos os ajustes (mantem cabecalho)."""
+    ws = _ws_named(_ABA_AJUST, COLS_AJUST)
+    if ws is None:
+        return False
+    try:
+        ws.clear()
+        ws.append_row(COLS_AJUST)
+        return True
+    except Exception:
+        return False
+
+
 # --- meta mensal de cadastradas (persistida por mes AAAA-MM) ---
 _ABA_META = "meta_mensal_neo"
 COLS_META = ["mes", "meta", "timestamp", "avaliador"]
