@@ -799,58 +799,63 @@ else:
                     "(1) conversao < conv_baixa nao sobe; (2) conversao ABAIXO da "
                     "mediana do grupo nao sobe; (3) rampa limita o passo por rodada; "
                     "(4) teto = maior peso do grupo x1.2.")
-                _cods = base_tr["Codigo"].astype(int).tolist()
-                _sel = st.selectbox(
-                    "Campanha para discutir", _cods,
-                    format_func=lambda c: base_tr[base_tr["Codigo"] == c]
-                    ["Campanha"].iloc[0], key="iacop_sel_neo")
-                _src = base_tr[base_tr["Codigo"] == _sel].iloc[0]
-                try:
-                    _ideal = edited[edited["Codigo"] == _sel]["Peso Ideal"].iloc[0]
-                except Exception:
-                    _ideal = _src.get("Peso Sugerido")
-                _info = {
-                    "Campanha": _src.get("Campanha"),
-                    "Conversao %": _src.get("% Conversao"),
-                    "% Abordagem": _src.get("% Abordagem"),
-                    "Ligacoes": _src.get("Ligacoes"),
-                    "Cadastradas": _src.get("Cadastradas"),
-                    "Base disponivel (abs)": _src.get("Disponiveis"),
-                    "Base disponivel %": _src.get("Disponivel %"),
-                    "Peso atual (discador)": _src.get("Peso Disc"),
-                    "Peso sugerido": _src.get("Peso Sugerido"),
-                    "Peso ideal do analista": _ideal,
-                }
-                st.caption(
-                    f"Conv **{_info['Conversao %']}%** · base disp **{_info['Base disponivel %']}%** "
-                    f"· atual **{_info['Peso atual (discador)']}** · sugerido "
-                    f"**{_info['Peso sugerido']}** · seu ideal **{_ideal}**")
-                _ck = f"_chat_neo_{_sel}"
+                # tabela de contexto: TODAS as campanhas do filtro + a edicao do analista
+                _ctx = edited.merge(
+                    base_tr[["Codigo", "% Conversao", "% Abordagem", "Disponivel %",
+                             "Ligacoes", "Disponiveis"]], on="Codigo", how="left")
+                _sug = pd.to_numeric(_ctx["Peso Sugerido"], errors="coerce")
+                _idl = pd.to_numeric(_ctx["Peso Ideal"], errors="coerce")
+                _ctx["_mudou"] = _idl != _sug
+                _linhas = []
+                for _, rr in _ctx.iterrows():
+                    _linhas.append(
+                        f"[{int(rr['Codigo'])}] {rr['Campanha']}: conv "
+                        f"{rr.get('% Conversao')}%, abordagem {rr.get('% Abordagem')}%, "
+                        f"base disp {rr.get('Disponivel %')}%, peso atual "
+                        f"{rr.get('Peso Disc')}, sugerido {rr.get('Peso Sugerido')}, "
+                        f"IDEAL do analista {rr.get('Peso Ideal')}"
+                        + ("  <== ALTERADO" if rr["_mudou"] else ""))
+                _tabela = "\n".join(_linhas)
+                _mud = _ctx[_ctx["_mudou"]]
+                st.caption(f"A IA enxerga as **{len(_ctx)} campanhas** do filtro atual "
+                           f"· **{len(_mud)}** com peso alterado por você. Descreva as "
+                           "mudanças numa mensagem só.")
+                _ck = "_chat_neo_global"
                 _msgs = st.session_state.setdefault(_ck, [])
                 for _m in _msgs:
                     with st.chat_message("user" if _m["role"] == "user" else "assistant"):
                         st.markdown(_m["content"])
                 _txt = st.text_area(
-                    "Explique por que mudaria (ou pergunte à IA)",
-                    key=f"iacop_in_{_sel}", height=80,
-                    placeholder="Ex.: quero subir o peso mesmo com conversao menor "
-                                "porque a base esta fresca e vai maturar…")
-                b1, b2 = st.columns([1, 1])
+                    "Explique suas mudanças (pode falar de várias campanhas de uma vez)",
+                    key="iacop_in_neo", height=110,
+                    placeholder="Ex.: subi a 24 pra 15 porque tem muitos nomes livres; "
+                                "baixei a 33 pra 10 porque a abordagem caiu. Faz sentido?")
+                b1, b2, b3 = st.columns(3)
                 if b1.button("💬 Enviar", use_container_width=True,
-                             key=f"iacop_send_{_sel}", disabled=not _txt.strip()):
+                             key="iacop_send_neo", disabled=not _txt.strip()):
                     _msgs.append({"role": "user", "content": _txt.strip()})
+                    _info = {"Campanhas do filtro (atual/sugerido/ideal)": "\n" + _tabela}
                     with st.spinner("Consultando a IA…"):
                         _r = iacop.responder(_msgs, _info, _LOGICA)
                     _msgs.append({"role": "assistant", "content": _r})
                     st.rerun()
-                if b2.button("💾 Usar raciocinio na avaliacao", use_container_width=True,
-                             key=f"iacop_obs_{_sel}", disabled=not _msgs):
-                    st.session_state.setdefault("_racional_neo", {})[int(_sel)] = \
-                        iacop.resumo_racional(_msgs)
-                    st.toast("Raciocinio vinculado — clique em Salvar avaliacao para gravar.")
-                if _msgs and st.button("🧹 Limpar conversa", key=f"iacop_clr_{_sel}"):
+                if b2.button("💾 Salvar raciocínio nas alteradas", use_container_width=True,
+                             key="iacop_obs_neo",
+                             disabled=(not _msgs or _mud.empty)):
+                    _rac = iacop.resumo_racional(_msgs)
+                    _d = st.session_state.setdefault("_racional_neo", {})
+                    for _c in _mud["Codigo"].astype(int):
+                        _d[_c] = _rac
+                    st.toast(f"Raciocínio vinculado a {len(_mud)} campanha(s) — "
+                             "clique em Salvar avaliacao para gravar no obs.")
+                if b3.button("🧹 Limpar conversa", use_container_width=True,
+                             key="iacop_clr_neo", disabled=not _msgs):
                     st.session_state[_ck] = []
                     st.rerun()
+                _stt = iacop.ultimo_status()
+                if _stt.get("remaining") is not None:
+                    st.caption(f"🔋 Requisições restantes hoje (GitHub Models): "
+                               f"{_stt.get('remaining')}/{_stt.get('limit', '?')}")
 
         # ---- Auto-calibracao ----
         with st.expander("🤖 Auto-calibracao (aprende com as avaliacoes)"):

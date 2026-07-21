@@ -29,6 +29,14 @@ SYSTEM = (
 )
 
 
+_STATUS: dict = {}
+
+
+def ultimo_status() -> dict:
+    """Ultimo status de rate-limit lido dos headers (GitHub Models)."""
+    return dict(_STATUS)
+
+
 def _gh_token() -> str:
     return (os.environ.get("GITHUB_MODELS_TOKEN")
             or os.environ.get("GITHUB_TOKEN") or "").strip()
@@ -81,8 +89,20 @@ def _resp_github(sistema: str, mensagens: list[dict]) -> str:
         msgs = [{"role": "system", "content": sistema}] + [
             {"role": m["role"], "content": str(m["content"])}
             for m in mensagens if m.get("content")]
-        resp = client.chat.completions.create(
+        raw = client.chat.completions.with_raw_response.create(
             model=model, messages=msgs, max_tokens=600)
+        try:
+            h = raw.headers
+            rem = (h.get("x-ratelimit-remaining-requests")
+                   or h.get("x-ratelimit-remaining"))
+            lim = (h.get("x-ratelimit-limit-requests")
+                   or h.get("x-ratelimit-limit"))
+            if rem is not None:
+                _STATUS.clear()
+                _STATUS.update({"remaining": rem, "limit": lim})
+        except Exception:
+            pass
+        resp = raw.parse()
         return (resp.choices[0].message.content or "").strip() or "(sem resposta)"
     except Exception as e:
         return f"Erro ao consultar a IA (GitHub Models): {type(e).__name__}: {e}"
