@@ -32,4 +32,7 @@ THRESHOLDS: dict[str, float] = {
     "peso_ramp_min": 3,
     "peso_teto_frac": 2.0,    # teto = max_do_grupo * frac (era 1.2x, agora 2.0x)
     "peso_expoente": 1.2,   # >1 faz a CONVERSAO mandar (nao so reverter a media)
+    "conv_med_frac": 0.70,  # so bloqueia subida se conv < 70% da mediana do grupo
+                             # (evita bloquear 3.4% so pq a mediana e 3.5% por causa
+                             # de uma campanha-estrela com 8%+)
 }

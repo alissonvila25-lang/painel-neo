@@ -308,11 +308,14 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
             b = float(_bias.get(_cods[i], 1.0))
             merit[i] = cvc * vf * b
         soma = sum(merit.values()) or 1.0
-        # mediana de conversao do grupo: campanha ABAIXO dela nao pode subir de
-        # peso (so manter/cair) — evita premiar quem converte pouco so por estar
-        # subponderado.
+        # mediana de conversao do grupo: so bloqueia subida se conv estiver
+        # SIGNIFICATIVAMENTE abaixo (< conv_med_frac * mediana, padrao 70%).
+        # Isso evita bloquear 3.4% ou 4% so pq uma campanha-estrela (8%+)
+        # puxa a mediana para cima.
         _cvs = [float(conv.loc[i]) for i in idx if pd.notna(conv.loc[i])]
         conv_med = float(pd.Series(_cvs).median()) if _cvs else 0.0
+        conv_med_frac = float(thr.get("conv_med_frac", 0.70))
+        conv_med_trava = conv_med * conv_med_frac  # limiar real de bloqueio
         for i in idx:
             alvo = int(round(min(max(budget * merit[i] / soma, 1), teto)))
             atual = int(ref.loc[i])
@@ -320,13 +323,12 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
             alvo = min(alvo, atual + step)
             alvo = max(alvo, atual - step)
             cvv = conv.loc[i]
-            # trava de subida: conversao ruim (< conv_baixa) OU abaixo da mediana
-            # do grupo -> nao aumenta o peso.
-            # EXCECAO: bias > 1.0 significa que o analista decidiu subir
-            # intencionalmente (via copiloto IA) -> relaxa a trava.
+            # trava de subida: bloqueia SOMENTE se a conversao for ruim de verdade
+            # (< conv_baixa absoluto) OU significativamente abaixo da mediana (< 70%).
+            # Bias do analista > 1.0 sempre libera a subida.
             b = float(_bias.get(_cods[i], 1.0))
             if alvo > atual and pd.notna(cvv) and (
-                    float(cvv) < cb or float(cvv) < conv_med) and b <= 1.0:
+                    float(cvv) < cb or float(cvv) < conv_med_trava) and b <= 1.0:
                 alvo = atual
             out.at[i] = alvo
     # fallback: toda campanha com peso de referencia recebe uma sugestao (fora
