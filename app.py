@@ -705,47 +705,40 @@ cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido", "Peso Idea
         "Disponivel %", "Fin. Tentativa", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
 
-# altura dinamica: 35px por linha + 38px de cabecalho (sem linhas em branco)
+# altura dinamica: sem linhas em branco
 _ROW_H = 35
 _HEADER_H = 38
-_diag_h = min(max(_ROW_H * len(diag) + _HEADER_H, _ROW_H + _HEADER_H), 600)
+_diag_h = _ROW_H * len(diag) + _HEADER_H
 
-# tabela unica: visual com .style (sem Peso Ideal) + data_editor sobreposto nao e
-# possivel. Solucao: data_editor com column_config customizado que preserva a leitura
-# e torna so Peso Ideal editavel.
+# tabela de diagnostico com gradiente original (.style) — somente leitura
+_diag_show = diag.drop(columns=["Peso Ideal"], errors="ignore")
+sty = _diag_show.style
+for gc in ["% Conversao", "Cadastradas", "% Abordagem", "Disponivel %", "Hit Rate %"]:
+    if gc in _diag_show.columns:
+        sty = sty.apply(grad_col, subset=[gc], axis=0)
+sty = sty.map(lambda v: f"color:{STATUS_COLOR.get(v,'')};font-weight:700"
+              if v in STATUS_COLOR else "", subset=["Status"])
+sty = fmt_tabela(sty, _diag_show)
+st.dataframe(sty, use_container_width=True, hide_index=True, height=_diag_h)
+st.download_button("⬇️ Exportar diagnostico (CSV)",
+                   _diag_show.to_csv(index=False).encode("utf-8-sig"),
+                   f"campanhas_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
+
+# editor compacto de Peso Ideal (apenas colunas de peso, altura dinamica)
+st.caption("✏️ **Peso Ideal (você)** — edite na tabela abaixo:")
+_ed_pesos = diag[["Codigo", "Campanha", "Peso Atual", "Peso Sugerido", "Peso Ideal"]].copy()
+_ed_h = _ROW_H * len(_ed_pesos) + _HEADER_H
 edited = st.data_editor(
-    diag, use_container_width=True, hide_index=True, height=_diag_h,
+    _ed_pesos, use_container_width=True, hide_index=True, height=_ed_h,
     key="editor_diag_neo",
     column_config={
-        "Codigo":          st.column_config.NumberColumn(disabled=True),
-        "Campanha":        st.column_config.TextColumn(disabled=True),
-        "Curva":           st.column_config.TextColumn(disabled=True),
-        "Peso Atual":      st.column_config.NumberColumn(disabled=True),
-        "Peso Sugerido":   st.column_config.NumberColumn(disabled=True),
-        "Peso Ideal":      st.column_config.NumberColumn(
-                               "Peso Ideal (você) ✏️", min_value=0, max_value=200, step=1),
-        "Coerencia":       st.column_config.TextColumn(disabled=True),
-        "Ligacoes":        st.column_config.NumberColumn(disabled=True),
-        "% Abordagem":     st.column_config.ProgressColumn(
-                               "% Abordagem", min_value=0, max_value=100, format="%.1f%%"),
-        "Cadastradas":     st.column_config.ProgressColumn(
-                               "Cadastradas", min_value=0,
-                               max_value=float(diag["Cadastradas"].max())
-                               if "Cadastradas" in diag.columns and diag["Cadastradas"].notna().any()
-                               else 100.0, format="%d"),
-        "% Conversao":     st.column_config.ProgressColumn(
-                               "% Conversao", min_value=0, max_value=8.0, format="%.1f%%"),
-        "Disponivel %":    st.column_config.ProgressColumn(
-                               "Disponivel %", min_value=0, max_value=100, format="%.1f%%"),
-        "Fin. Tentativa":  st.column_config.NumberColumn(disabled=True),
-        "Hit Rate %":      st.column_config.ProgressColumn(
-                               "Hit Rate %", min_value=0, max_value=15.0, format="%.1f%%"),
-        "Status":          st.column_config.TextColumn(disabled=True),
+        "Codigo":        st.column_config.NumberColumn(disabled=True),
+        "Campanha":      st.column_config.TextColumn(disabled=True),
+        "Peso Atual":    st.column_config.NumberColumn(disabled=True),
+        "Peso Sugerido": st.column_config.NumberColumn(disabled=True),
+        "Peso Ideal":    st.column_config.NumberColumn(
+                             "Peso Ideal (você) ✏️", min_value=0, max_value=200, step=1),
     })
-st.caption("✏️ Coluna **Peso Ideal (você)** editável diretamente na tabela.")
-st.download_button("⬇️ Exportar diagnostico (CSV)",
-                   diag.to_csv(index=False).encode("utf-8-sig"),
-                   f"campanhas_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
 
 # Visao do discador — logo apos o diagnostico (sem precisar rolar para cima)
 if disc is not None and not disc.empty:
