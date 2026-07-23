@@ -47,11 +47,11 @@ def _anth_key() -> str:
 
 
 def _provider() -> str:
-    """Prioriza GitHub Models (gratis) se houver token; senao Anthropic."""
-    if _gh_token():
-        return "github"
+    """Prioriza Anthropic; GitHub Models como fallback (sendo descontinuado)."""
     if _anth_key():
         return "anthropic"
+    if _gh_token():
+        return "github"
     return ""
 
 
