@@ -74,6 +74,7 @@ RELATORIOS: dict[int, dict[str, int]] = {
         "ligacoes_gravacoes": 146,
         "performance_vendas": 149,
         "vendas_por_operador": 151,
+        "mapa_ligacoes":       163,   # Mapa de Ligacoes (status/nao pertence)
     },
 }
 

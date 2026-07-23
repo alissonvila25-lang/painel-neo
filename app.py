@@ -218,6 +218,22 @@ def _carregar_treino():
     return treino.carregar()
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _mapa_ligacoes():
+    """Mapa de Ligacoes (menu 163): % por status da semana (7d)."""
+    try:
+        pid = P.PROJETOS_PORTAL[PROJETO]
+        _r  = P.RELATORIOS[pid]
+        if "mapa_ligacoes" not in _r:
+            return pd.DataFrame()
+        df = _job(lambda pa: pa.fetch_relatorio(
+            pid, _r["mapa_ligacoes"],
+            today_br() - timedelta(days=7), today_br() - timedelta(days=1)))
+        return df if df is not None else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _status_treino():
     try:
@@ -759,6 +775,15 @@ if disc is not None and not disc.empty:
                 _dsty = _dsty.apply(grad_col, subset=[_gc], axis=0)
         _dsty = fmt_tabela(_dsty, _dd)
         st.dataframe(_dsty, use_container_width=True, hide_index=True, height=_dd_h)
+
+        # % "Telefone nao pertence ao contato" (Mapa de Ligacoes, status 203)
+        _ml = _mapa_ligacoes()
+        if not _ml.empty and "Status" in _ml.columns and "% Ligações" in _ml.columns:
+            _np = _ml[_ml["Status"].astype(str).str.contains("não pertence|nao pertence", case=False, na=False)]
+            if not _np.empty:
+                _pct_np = pd.to_numeric(_np["% Ligações"].astype(str).str.replace(",","."), errors="coerce").sum()
+                st.metric("📵 Telefone não pertence (7d)", f"{_pct_np:.1f}%",
+                          help="% das ligações da semana com status 'Telefone não pertence ao contato' (Mapa de Ligações)")
 
 
 # --------------------------------------------------------------------------- #
