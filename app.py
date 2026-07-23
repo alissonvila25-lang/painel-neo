@@ -723,6 +723,16 @@ cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido", "Peso Idea
         "Disponivel %", "Fin. Tentativa", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
 
+# Status: adiciona emoji para preservar identidade visual sem .style
+_EMOJI_STATUS = {"Critico": "🔴 Critico", "Atencao": "🟡 Atencao",
+                 "Saudavel": "🟢 Saudavel", "Oportunidade": "✨ Oportunidade"}
+if "Status" in diag.columns:
+    diag["Status"] = diag["Status"].map(lambda v: _EMOJI_STATUS.get(v, v))
+
+# Coerencia: emoji inline
+_EMOJI_COER = {"⬆️ Subir": "⬆️ Subir", "⬇️ Baixar": "⬇️ Baixar",
+               "✅ OK": "✅ OK", "💤 Ocioso": "💤 Ocioso", "—": "—"}
+
 # editor (apenas Peso Ideal editavel, resto travado)
 _col_cfg = {
     "Codigo":         st.column_config.NumberColumn(disabled=True),
@@ -734,20 +744,21 @@ _col_cfg = {
                           "Peso Ideal (você)", min_value=0, max_value=200, step=1),
     "Coerencia":      st.column_config.TextColumn(disabled=True),
     "Ligacoes":       st.column_config.NumberColumn(disabled=True),
-    "% Abordagem":    st.column_config.NumberColumn(disabled=True),
-    "Cadastradas":    st.column_config.NumberColumn(disabled=True),
-    "% Conversao":    st.column_config.NumberColumn(disabled=True),
-    "Disponivel %":   st.column_config.NumberColumn(disabled=True),
+    "% Abordagem":    st.column_config.ProgressColumn(
+                          "% Abordagem", min_value=0, max_value=100, format="%.1f%%"),
+    "Cadastradas":    st.column_config.ProgressColumn(
+                          "Cadastradas", min_value=0,
+                          max_value=int(diag["Cadastradas"].max()) if "Cadastradas" in diag.columns and diag["Cadastradas"].notna().any() else 100,
+                          format="%d"),
+    "% Conversao":    st.column_config.ProgressColumn(
+                          "% Conversao", min_value=0, max_value=10, format="%.1f%%"),
+    "Disponivel %":   st.column_config.ProgressColumn(
+                          "Disponivel %", min_value=0, max_value=100, format="%.1f%%"),
     "Fin. Tentativa": st.column_config.NumberColumn(disabled=True),
-    "Hit Rate %":     st.column_config.NumberColumn(disabled=True),
+    "Hit Rate %":     st.column_config.ProgressColumn(
+                          "Hit Rate %", min_value=0, max_value=20, format="%.1f%%"),
     "Status":         st.column_config.TextColumn(disabled=True),
 }
-# aplica coloração de status via coluna calculada (data_editor nao aceita .style)
-# adiciona emoji ao status para manter contexto visual
-if "Status" in diag.columns:
-    diag["Status"] = diag["Status"].map(
-        lambda v: f"{STATUS_COLOR.get(v,'') and ''}{v}"  # placeholder, cor via config abaixo
-    )
 # editor principal do diagnostico — tambem serve como fonte do Treinamento
 edited = st.data_editor(
     diag, use_container_width=True, hide_index=True, height=430,
