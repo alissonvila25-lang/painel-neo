@@ -791,12 +791,11 @@ else:
         st.caption("Sem campanhas com Peso Sugerido para avaliar.")
     else:
         # le o Peso Ideal diretamente do editor do diagnostico (sem re-exibir tabela)
-        _diag_ed = st.session_state.get("editor_diag_neo", edited)
         _ideal_map = {}
-        if _diag_ed is not None and "Peso Ideal" in _diag_ed.columns:
+        if "Peso Ideal" in edited.columns:
             _ideal_map = dict(zip(
-                _diag_ed["Codigo"].astype(int),
-                pd.to_numeric(_diag_ed["Peso Ideal"], errors="coerce")))
+                edited["Codigo"].astype(int),
+                pd.to_numeric(edited["Peso Ideal"], errors="coerce")))
         st.caption("Os pesos abaixo refletem o que voce editou no Diagnostico acima. "
                    "Ajuste la e clique Salvar.")
         # mostra um resumo compacto das campanhas com peso alterado
@@ -813,7 +812,7 @@ else:
         st.dataframe(_ed_preview, use_container_width=True, hide_index=True, height=240)
 
         # usa os ideais do editor de diagnostico como fonte para salvar
-        edited_for_save = _diag_ed if _diag_ed is not None else edited
+        edited_for_save = edited
         if st.button("💾 Salvar avaliacao", use_container_width=True):
             agora = now_br()
             rows = []
