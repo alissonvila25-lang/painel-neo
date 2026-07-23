@@ -292,7 +292,7 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
         if len(idx) < 2:
             continue
         budget = float(ref.loc[idx].sum())
-        teto = int(round(ref.loc[idx].max() * 1.2))
+        teto = int(round(ref.loc[idx].max() * float(thr.get("peso_teto_frac", 2.0))))
         vol_med = float(pd.Series([max(float(disp_abs.loc[i]), 0.0)
                                    for i in idx]).median()) or 1.0
         merit = {}
