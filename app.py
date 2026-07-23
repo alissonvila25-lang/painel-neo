@@ -683,24 +683,6 @@ if acoes:
             f"<div class='m'>{a['Detalhe']}</div></div>",
             unsafe_allow_html=True)
 
-if disc is not None and not disc.empty:
-    _dd = E.normalizar_discador(disc)
-    if not _dd.empty:
-        st.subheader("Visao do discador 🎧")
-        _nomes = dict(zip(df_camp["Codigo"], df_camp["Campanha"]))
-        _dd["Campanha"] = _dd["Codigo"].map(_nomes).fillna(_dd["Codigo"].astype(str))
-        _dcols = ["Campanha", "Peso Disc", "Hit Rate %", "Penetracao %",
-                  "Total da Base", "Disponiveis", "Livres", "Fin. Tentativa",
-                  "Bloqueados"]
-        _dd = _dd[[c for c in _dcols if c in _dd.columns]].sort_values(
-            "Disponiveis", ascending=False)
-        _dsty = _dd.style
-        for _gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
-            if _gc in _dd.columns:
-                _dsty = _dsty.apply(grad_col, subset=[_gc], axis=0)
-        _dsty = fmt_tabela(_dsty, _dd)
-        st.dataframe(_dsty, use_container_width=True, hide_index=True)
-
 st.subheader("Diagnostico por campanha 📋")
 diag = df_camp.copy().sort_values("Codigo").rename(columns={"Peso Disc": "Peso Atual"})
 diag["Coerencia"] = diag["Coerencia"].map(lambda c: COER_LABEL.get(c, c))
@@ -723,52 +705,67 @@ cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido", "Peso Idea
         "Disponivel %", "Fin. Tentativa", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
 
-# tabela de diagnóstico com formatação visual original (.style)
-_diag_show = diag.drop(columns=["Peso Ideal"], errors="ignore")
-sty = _diag_show.style
-for gc in ["% Conversao", "Cadastradas", "% Abordagem", "Disponivel %", "Hit Rate %"]:
-    if gc in _diag_show.columns:
-        sty = sty.apply(grad_col, subset=[gc], axis=0)
-sty = sty.map(lambda v: f"color:{STATUS_COLOR.get(v.split()[-1] if ' ' in str(v) else v, '')};font-weight:700"
-              if str(v).split()[-1] in STATUS_COLOR or v in STATUS_COLOR else "",
-              subset=["Status"])
-sty = fmt_tabela(sty, _diag_show)
-st.dataframe(sty, use_container_width=True, hide_index=True, height=430)
-st.download_button("⬇️ Exportar diagnostico (CSV)",
-                   _diag_show.to_csv(index=False).encode("utf-8-sig"),
-                   f"campanhas_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
+# altura dinamica: 35px por linha + 38px de cabecalho (sem linhas em branco)
+_ROW_H = 35
+_HEADER_H = 38
+_diag_h = min(max(_ROW_H * len(diag) + _HEADER_H, _ROW_H + _HEADER_H), 600)
 
-# editor compacto de Peso Ideal (logo abaixo, apenas colunas de peso)
-st.caption("✏️ **Peso Ideal (você)** — edite abaixo e desça para Salvar:")
-_ed_pesos = diag[["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido", "Peso Ideal"]].copy()
+# tabela unica: visual com .style (sem Peso Ideal) + data_editor sobreposto nao e
+# possivel. Solucao: data_editor com column_config customizado que preserva a leitura
+# e torna so Peso Ideal editavel.
 edited = st.data_editor(
-    _ed_pesos, use_container_width=True, hide_index=True, height=320,
+    diag, use_container_width=True, hide_index=True, height=_diag_h,
     key="editor_diag_neo",
     column_config={
-        "Codigo":        st.column_config.NumberColumn(disabled=True),
-        "Campanha":      st.column_config.TextColumn(disabled=True),
-        "Curva":         st.column_config.TextColumn(disabled=True),
-        "Peso Atual":    st.column_config.NumberColumn(disabled=True),
-        "Peso Sugerido": st.column_config.NumberColumn(disabled=True),
-        "Peso Ideal":    st.column_config.NumberColumn(
-                             "Peso Ideal (você)", min_value=0, max_value=200, step=1),
+        "Codigo":          st.column_config.NumberColumn(disabled=True),
+        "Campanha":        st.column_config.TextColumn(disabled=True),
+        "Curva":           st.column_config.TextColumn(disabled=True),
+        "Peso Atual":      st.column_config.NumberColumn(disabled=True),
+        "Peso Sugerido":   st.column_config.NumberColumn(disabled=True),
+        "Peso Ideal":      st.column_config.NumberColumn(
+                               "Peso Ideal (você) ✏️", min_value=0, max_value=200, step=1),
+        "Coerencia":       st.column_config.TextColumn(disabled=True),
+        "Ligacoes":        st.column_config.NumberColumn(disabled=True),
+        "% Abordagem":     st.column_config.ProgressColumn(
+                               "% Abordagem", min_value=0, max_value=100, format="%.1f%%"),
+        "Cadastradas":     st.column_config.ProgressColumn(
+                               "Cadastradas", min_value=0,
+                               max_value=float(diag["Cadastradas"].max())
+                               if "Cadastradas" in diag.columns and diag["Cadastradas"].notna().any()
+                               else 100.0, format="%d"),
+        "% Conversao":     st.column_config.ProgressColumn(
+                               "% Conversao", min_value=0, max_value=8.0, format="%.1f%%"),
+        "Disponivel %":    st.column_config.ProgressColumn(
+                               "Disponivel %", min_value=0, max_value=100, format="%.1f%%"),
+        "Fin. Tentativa":  st.column_config.NumberColumn(disabled=True),
+        "Hit Rate %":      st.column_config.ProgressColumn(
+                               "Hit Rate %", min_value=0, max_value=15.0, format="%.1f%%"),
+        "Status":          st.column_config.TextColumn(disabled=True),
     })
+st.caption("✏️ Coluna **Peso Ideal (você)** editável diretamente na tabela.")
+st.download_button("⬇️ Exportar diagnostico (CSV)",
+                   diag.to_csv(index=False).encode("utf-8-sig"),
+                   f"campanhas_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
 
-# --- Mapa de conversao x volume ---
-_mapa = df_camp[df_camp["Ligacoes"] > 0].copy()
-if not _mapa.empty and _mapa["% Conversao"].notna().any():
-    st.subheader("Mapa de conversao × volume 🗺️")
-    _mapa["% Conversao"] = pd.to_numeric(_mapa["% Conversao"], errors="coerce").fillna(0)
-    fig = px.scatter(
-        _mapa, x="Ligacoes", y="% Conversao", size="Cadastradas",
-        color="Status", color_discrete_map=STATUS_COLOR,
-        hover_name="Campanha", size_max=40,
-        labels={"Ligacoes": "Ligacoes", "% Conversao": "Conversao %"})
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      font_color="#c3cad6", height=420,
-                      legend=dict(orientation="h", y=-0.2))
-    fig.update_xaxes(gridcolor="#232a38"); fig.update_yaxes(gridcolor="#232a38")
-    st.plotly_chart(fig, use_container_width=True)
+# Visao do discador — logo apos o diagnostico (sem precisar rolar para cima)
+if disc is not None and not disc.empty:
+    _dd = E.normalizar_discador(disc)
+    if not _dd.empty:
+        st.subheader("Visao do discador 🎧")
+        _nomes = dict(zip(df_camp["Codigo"], df_camp["Campanha"]))
+        _dd["Campanha"] = _dd["Codigo"].map(_nomes).fillna(_dd["Codigo"].astype(str))
+        _dcols = ["Campanha", "Peso Disc", "Hit Rate %", "Penetracao %",
+                  "Total da Base", "Disponiveis", "Livres", "Fin. Tentativa",
+                  "Bloqueados"]
+        _dd = _dd[[c for c in _dcols if c in _dd.columns]].sort_values(
+            "Disponiveis", ascending=False)
+        _dd_h = min(_ROW_H * len(_dd) + _HEADER_H, 400)
+        _dsty = _dd.style
+        for _gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
+            if _gc in _dd.columns:
+                _dsty = _dsty.apply(grad_col, subset=[_gc], axis=0)
+        _dsty = fmt_tabela(_dsty, _dd)
+        st.dataframe(_dsty, use_container_width=True, hide_index=True, height=_dd_h)
 
 
 # --------------------------------------------------------------------------- #
