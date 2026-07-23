@@ -784,7 +784,10 @@ else:
         st.caption("Os pesos abaixo refletem o que voce editou no Diagnostico acima. "
                    "Ajuste la e clique Salvar.")
         # mostra um resumo compacto das campanhas com peso alterado
-        _ed_preview = base_tr[["Codigo", "Campanha", "Peso Sugerido"]].copy()
+        _extra_cols = ["% Abordagem", "% Conversao", "Cadastradas", "Disponivel %"]
+        _base_cols = ["Codigo", "Campanha", "Peso Sugerido"] + \
+                     [c for c in _extra_cols if c in base_tr.columns]
+        _ed_preview = base_tr[_base_cols].copy()
         _ed_preview["Peso Ideal"] = _ed_preview["Codigo"].map(
             lambda c: _ideal_map.get(int(c), _prev_ideal.get(str(int(c)),
                       base_tr[base_tr["Codigo"]==c]["Peso Sugerido"].iloc[0]
@@ -794,7 +797,13 @@ else:
             - pd.to_numeric(_ed_preview["Peso Sugerido"], errors="coerce")).round(0)
         _ed_preview["Diferenca"] = _ed_preview["Diferenca"].map(
             lambda v: f"{v:+.0f}" if pd.notna(v) and v != 0 else "—")
-        st.dataframe(_ed_preview, use_container_width=True, hide_index=True, height=240)
+        _prev_h = 35 * len(_ed_preview) + 38
+        _prev_sty = _ed_preview.style
+        for _gc in ["% Abordagem", "% Conversao", "Cadastradas", "Disponivel %"]:
+            if _gc in _ed_preview.columns:
+                _prev_sty = _prev_sty.apply(grad_col, subset=[_gc], axis=0)
+        _prev_sty = fmt_tabela(_prev_sty, _ed_preview)
+        st.dataframe(_prev_sty, use_container_width=True, hide_index=True, height=_prev_h)
 
         # usa os ideais do editor de diagnostico como fonte para salvar
         edited_for_save = edited
