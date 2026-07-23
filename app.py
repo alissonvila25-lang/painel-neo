@@ -704,21 +704,60 @@ if disc is not None and not disc.empty:
 st.subheader("Diagnostico por campanha 📋")
 diag = df_camp.copy().sort_values("Codigo").rename(columns={"Peso Disc": "Peso Atual"})
 diag["Coerencia"] = diag["Coerencia"].map(lambda c: COER_LABEL.get(c, c))
-cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido",
+
+# --- Peso Ideal: carrega historico para pre-popular o campo ---
+_hist_tr = _carregar_treino()
+_prev_ideal = {}
+if not _hist_tr.empty and {"codigo", "peso_ideal"} <= set(_hist_tr.columns):
+    _h = _hist_tr.sort_values("data") if "data" in _hist_tr.columns else _hist_tr
+    _h = _h.groupby("codigo").tail(1)
+    _prev_ideal = dict(zip(_h["codigo"].astype(str),
+                           pd.to_numeric(_h["peso_ideal"], errors="coerce")))
+diag["Peso Ideal"] = diag.apply(
+    lambda r: _prev_ideal.get(str(int(r["Codigo"])),
+              r.get("Peso Sugerido") if pd.notna(r.get("Peso Sugerido")) else None),
+    axis=1)
+
+cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido", "Peso Ideal",
         "Coerencia", "Ligacoes", "% Abordagem", "Cadastradas", "% Conversao",
         "Disponivel %", "Fin. Tentativa", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
-sty = diag.style
-for gc in ["% Conversao", "Cadastradas", "% Abordagem", "Disponivel %", "Hit Rate %"]:
-    if gc in diag.columns:
-        sty = sty.apply(grad_col, subset=[gc], axis=0)
-sty = sty.map(lambda v: f"color:{STATUS_COLOR.get(v, '')};font-weight:700"
-              if v in STATUS_COLOR else "", subset=["Status"])
-sty = fmt_tabela(sty, diag)
-st.dataframe(sty, use_container_width=True, hide_index=True, height=430)
+
+# editor (apenas Peso Ideal editavel, resto travado)
+_col_cfg = {
+    "Codigo":         st.column_config.NumberColumn(disabled=True),
+    "Campanha":       st.column_config.TextColumn(disabled=True),
+    "Curva":          st.column_config.TextColumn(disabled=True),
+    "Peso Atual":     st.column_config.NumberColumn(disabled=True),
+    "Peso Sugerido":  st.column_config.NumberColumn(disabled=True),
+    "Peso Ideal":     st.column_config.NumberColumn(
+                          "Peso Ideal (você)", min_value=0, max_value=200, step=1),
+    "Coerencia":      st.column_config.TextColumn(disabled=True),
+    "Ligacoes":       st.column_config.NumberColumn(disabled=True),
+    "% Abordagem":    st.column_config.NumberColumn(disabled=True),
+    "Cadastradas":    st.column_config.NumberColumn(disabled=True),
+    "% Conversao":    st.column_config.NumberColumn(disabled=True),
+    "Disponivel %":   st.column_config.NumberColumn(disabled=True),
+    "Fin. Tentativa": st.column_config.NumberColumn(disabled=True),
+    "Hit Rate %":     st.column_config.NumberColumn(disabled=True),
+    "Status":         st.column_config.TextColumn(disabled=True),
+}
+# aplica coloração de status via coluna calculada (data_editor nao aceita .style)
+# adiciona emoji ao status para manter contexto visual
+if "Status" in diag.columns:
+    diag["Status"] = diag["Status"].map(
+        lambda v: f"{STATUS_COLOR.get(v,'') and ''}{v}"  # placeholder, cor via config abaixo
+    )
+# editor principal do diagnostico — tambem serve como fonte do Treinamento
+edited = st.data_editor(
+    diag, use_container_width=True, hide_index=True, height=430,
+    key="editor_diag_neo",
+    column_config=_col_cfg)
 st.download_button("⬇️ Exportar diagnostico (CSV)",
                    diag.to_csv(index=False).encode("utf-8-sig"),
                    f"campanhas_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
+st.caption("✏️ Edite a coluna **Peso Ideal (você)** diretamente na tabela — "
+           "os valores fluem automaticamente para o Treinamento abaixo.")
 
 # --- Mapa de conversao x volume ---
 _mapa = df_camp[df_camp["Ligacoes"] > 0].copy()
@@ -751,38 +790,39 @@ else:
     if base_tr.empty:
         st.caption("Sem campanhas com Peso Sugerido para avaliar.")
     else:
-        hist = _carregar_treino()
-        prev = {}
-        if not hist.empty and {"codigo", "peso_ideal"} <= set(hist.columns):
-            h = hist.copy()
-            if "data" in h.columns:
-                h = h.sort_values("data")
-            h = h.groupby("codigo").tail(1)
-            prev = dict(zip(h["codigo"].astype(str),
-                            pd.to_numeric(h["peso_ideal"], errors="coerce")))
-        ed = base_tr[["Codigo", "Campanha", "Curva", "Peso Config", "Peso Disc",
-                      "Peso Sugerido"]].copy()
-        ed["Peso Ideal"] = ed.apply(
-            lambda r: prev.get(str(int(r["Codigo"])), r["Peso Sugerido"]), axis=1)
-        edited = st.data_editor(
-            ed, use_container_width=True, hide_index=True, height=320,
-            key="editor_treino_neo",
-            column_config={
-                "Codigo": st.column_config.NumberColumn(disabled=True),
-                "Campanha": st.column_config.TextColumn(disabled=True),
-                "Curva": st.column_config.TextColumn(disabled=True),
-                "Peso Config": st.column_config.NumberColumn(disabled=True),
-                "Peso Disc": st.column_config.NumberColumn(disabled=True),
-                "Peso Sugerido": st.column_config.NumberColumn(disabled=True),
-                "Peso Ideal": st.column_config.NumberColumn(
-                    "Peso Ideal (você)", min_value=0, max_value=200, step=1),
-            })
+        # le o Peso Ideal diretamente do editor do diagnostico (sem re-exibir tabela)
+        _diag_ed = st.session_state.get("editor_diag_neo", edited)
+        _ideal_map = {}
+        if _diag_ed is not None and "Peso Ideal" in _diag_ed.columns:
+            _ideal_map = dict(zip(
+                _diag_ed["Codigo"].astype(int),
+                pd.to_numeric(_diag_ed["Peso Ideal"], errors="coerce")))
+        st.caption("Os pesos abaixo refletem o que voce editou no Diagnostico acima. "
+                   "Ajuste la e clique Salvar.")
+        # mostra um resumo compacto das campanhas com peso alterado
+        _ed_preview = base_tr[["Codigo", "Campanha", "Peso Sugerido"]].copy()
+        _ed_preview["Peso Ideal"] = _ed_preview["Codigo"].map(
+            lambda c: _ideal_map.get(int(c), _prev_ideal.get(str(int(c)),
+                      base_tr[base_tr["Codigo"]==c]["Peso Sugerido"].iloc[0]
+                      if not base_tr[base_tr["Codigo"]==c].empty else None)))
+        _ed_preview["Diferenca"] = (
+            pd.to_numeric(_ed_preview["Peso Ideal"], errors="coerce")
+            - pd.to_numeric(_ed_preview["Peso Sugerido"], errors="coerce")).round(0)
+        _ed_preview["Diferenca"] = _ed_preview["Diferenca"].map(
+            lambda v: f"{v:+.0f}" if pd.notna(v) and v != 0 else "—")
+        st.dataframe(_ed_preview, use_container_width=True, hide_index=True, height=240)
+
+        # usa os ideais do editor de diagnostico como fonte para salvar
+        edited_for_save = _diag_ed if _diag_ed is not None else edited
         if st.button("💾 Salvar avaliacao", use_container_width=True):
             agora = now_br()
             rows = []
-            for _, r in edited.iterrows():
+            for _, r in edited_for_save.iterrows():
                 cod = int(r["Codigo"])
-                src = base_tr[base_tr["Codigo"] == cod].iloc[0]
+                _src_rows = base_tr[base_tr["Codigo"] == cod]
+                if _src_rows.empty:
+                    continue
+                src = _src_rows.iloc[0]
                 rows.append({
                     "data": agora.strftime("%Y-%m-%d"),
                     "timestamp": agora.strftime("%H:%M:%S"),
@@ -828,7 +868,7 @@ else:
                     "mediana do grupo nao sobe; (3) rampa limita o passo por rodada; "
                     "(4) teto = maior peso do grupo x1.2.")
                 # tabela de contexto: TODAS as campanhas do filtro + a edicao do analista
-                _ctx = edited.merge(
+                _ctx = edited_for_save.merge(
                     base_tr[["Codigo", "% Conversao", "% Abordagem", "Disponivel %",
                              "Ligacoes", "Disponiveis"]], on="Codigo", how="left")
                 _sug = pd.to_numeric(_ctx["Peso Sugerido"], errors="coerce")
