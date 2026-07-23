@@ -723,52 +723,36 @@ cols = ["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido", "Peso Idea
         "Disponivel %", "Fin. Tentativa", "Hit Rate %", "Status"]
 diag = diag[[c for c in cols if c in diag.columns]]
 
-# Status: adiciona emoji para preservar identidade visual sem .style
-_EMOJI_STATUS = {"Critico": "🔴 Critico", "Atencao": "🟡 Atencao",
-                 "Saudavel": "🟢 Saudavel", "Oportunidade": "✨ Oportunidade"}
-if "Status" in diag.columns:
-    diag["Status"] = diag["Status"].map(lambda v: _EMOJI_STATUS.get(v, v))
-
-# Coerencia: emoji inline
-_EMOJI_COER = {"⬆️ Subir": "⬆️ Subir", "⬇️ Baixar": "⬇️ Baixar",
-               "✅ OK": "✅ OK", "💤 Ocioso": "💤 Ocioso", "—": "—"}
-
-# editor (apenas Peso Ideal editavel, resto travado)
-_col_cfg = {
-    "Codigo":         st.column_config.NumberColumn(disabled=True),
-    "Campanha":       st.column_config.TextColumn(disabled=True),
-    "Curva":          st.column_config.TextColumn(disabled=True),
-    "Peso Atual":     st.column_config.NumberColumn(disabled=True),
-    "Peso Sugerido":  st.column_config.NumberColumn(disabled=True),
-    "Peso Ideal":     st.column_config.NumberColumn(
-                          "Peso Ideal (você)", min_value=0, max_value=200, step=1),
-    "Coerencia":      st.column_config.TextColumn(disabled=True),
-    "Ligacoes":       st.column_config.NumberColumn(disabled=True),
-    "% Abordagem":    st.column_config.ProgressColumn(
-                          "% Abordagem", min_value=0, max_value=100, format="%.1f%%"),
-    "Cadastradas":    st.column_config.ProgressColumn(
-                          "Cadastradas", min_value=0,
-                          max_value=int(diag["Cadastradas"].max()) if "Cadastradas" in diag.columns and diag["Cadastradas"].notna().any() else 100,
-                          format="%d"),
-    "% Conversao":    st.column_config.ProgressColumn(
-                          "% Conversao", min_value=0, max_value=10, format="%.1f%%"),
-    "Disponivel %":   st.column_config.ProgressColumn(
-                          "Disponivel %", min_value=0, max_value=100, format="%.1f%%"),
-    "Fin. Tentativa": st.column_config.NumberColumn(disabled=True),
-    "Hit Rate %":     st.column_config.ProgressColumn(
-                          "Hit Rate %", min_value=0, max_value=20, format="%.1f%%"),
-    "Status":         st.column_config.TextColumn(disabled=True),
-}
-# editor principal do diagnostico — tambem serve como fonte do Treinamento
-edited = st.data_editor(
-    diag, use_container_width=True, hide_index=True, height=430,
-    key="editor_diag_neo",
-    column_config=_col_cfg)
+# tabela de diagnóstico com formatação visual original (.style)
+_diag_show = diag.drop(columns=["Peso Ideal"], errors="ignore")
+sty = _diag_show.style
+for gc in ["% Conversao", "Cadastradas", "% Abordagem", "Disponivel %", "Hit Rate %"]:
+    if gc in _diag_show.columns:
+        sty = sty.apply(grad_col, subset=[gc], axis=0)
+sty = sty.map(lambda v: f"color:{STATUS_COLOR.get(v.split()[-1] if ' ' in str(v) else v, '')};font-weight:700"
+              if str(v).split()[-1] in STATUS_COLOR or v in STATUS_COLOR else "",
+              subset=["Status"])
+sty = fmt_tabela(sty, _diag_show)
+st.dataframe(sty, use_container_width=True, hide_index=True, height=430)
 st.download_button("⬇️ Exportar diagnostico (CSV)",
-                   diag.to_csv(index=False).encode("utf-8-sig"),
+                   _diag_show.to_csv(index=False).encode("utf-8-sig"),
                    f"campanhas_neo_{dt_ini:%Y%m%d}.csv", "text/csv")
-st.caption("✏️ Edite a coluna **Peso Ideal (você)** diretamente na tabela — "
-           "os valores fluem automaticamente para o Treinamento abaixo.")
+
+# editor compacto de Peso Ideal (logo abaixo, apenas colunas de peso)
+st.caption("✏️ **Peso Ideal (você)** — edite abaixo e desça para Salvar:")
+_ed_pesos = diag[["Codigo", "Campanha", "Curva", "Peso Atual", "Peso Sugerido", "Peso Ideal"]].copy()
+edited = st.data_editor(
+    _ed_pesos, use_container_width=True, hide_index=True, height=320,
+    key="editor_diag_neo",
+    column_config={
+        "Codigo":        st.column_config.NumberColumn(disabled=True),
+        "Campanha":      st.column_config.TextColumn(disabled=True),
+        "Curva":         st.column_config.TextColumn(disabled=True),
+        "Peso Atual":    st.column_config.NumberColumn(disabled=True),
+        "Peso Sugerido": st.column_config.NumberColumn(disabled=True),
+        "Peso Ideal":    st.column_config.NumberColumn(
+                             "Peso Ideal (você)", min_value=0, max_value=200, step=1),
+    })
 
 # --- Mapa de conversao x volume ---
 _mapa = df_camp[df_camp["Ligacoes"] > 0].copy()
