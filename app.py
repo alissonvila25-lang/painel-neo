@@ -751,7 +751,7 @@ if disc is not None and not disc.empty:
                   "Total da Base", "Disponiveis", "Livres", "Fin. Tentativa",
                   "Bloqueados"]
         _dd = _dd[[c for c in _dcols if c in _dd.columns]].sort_values(
-            "Disponiveis", ascending=False)
+            "Campanha", ascending=True)
         _dd_h = min(_ROW_H * len(_dd) + _HEADER_H, 400)
         _dsty = _dd.style
         for _gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
