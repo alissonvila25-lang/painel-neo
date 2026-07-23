@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 
 _MODEL_GH_DEFAULT = "openai/gpt-4o-mini"        # GitHub Models (gratis, rate-limit)
-_MODEL_ANTH_DEFAULT = "claude-3-5-haiku-latest"  # Anthropic (pago)
+_MODEL_ANTH_DEFAULT = "claude-haiku-4-5"       # Anthropic (pago, mais barato)
 _GH_URL_DEFAULT = "https://models.github.ai/inference"
 
 SYSTEM = (
