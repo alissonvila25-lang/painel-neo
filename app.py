@@ -768,22 +768,28 @@ if disc is not None and not disc.empty:
                   "Bloqueados"]
         _dd = _dd[[c for c in _dcols if c in _dd.columns]].sort_values(
             "Campanha", ascending=True)
+        # junta % Nao Pertence por campanha
+        _ml = _mapa_ligacoes()
+        if not _ml.empty:
+            _ml["_camp_curto"] = _ml["Campanha"].str.replace(r"^\d+ - ", "", regex=True).str.strip()
+            _dd["_camp_curto"]  = _dd["Campanha"].str.replace(r"^\d+ - ", "", regex=True).str.strip()
+            _dd = _dd.merge(_ml[["_camp_curto", "% Nao Pertence"]],
+                            on="_camp_curto", how="left").drop(columns=["_camp_curto"])
+            _dd["% Nao Pertence"] = _dd["% Nao Pertence"].round(1)
         _dd_h = min(_ROW_H * len(_dd) + _HEADER_H, 400)
         _dsty = _dd.style
         for _gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
             if _gc in _dd.columns:
                 _dsty = _dsty.apply(grad_col, subset=[_gc], axis=0)
+        if "% Nao Pertence" in _dd.columns:
+            # gradiente invertido: mais alto = pior (vermelho)
+            _dsty = _dsty.apply(
+                lambda s: [f"background-color:rgba(255,75,92,{min(float(str(v).replace(',','.') or 0)/30,0.7):.2f})"
+                           if str(v) not in ("nan","None","") else ""
+                           for v in s],
+                subset=["% Nao Pertence"], axis=0)
         _dsty = fmt_tabela(_dsty, _dd)
         st.dataframe(_dsty, use_container_width=True, hide_index=True, height=_dd_h)
-
-        # % "Telefone nao pertence ao contato" (Mapa de Ligacoes, status 203)
-        _ml = _mapa_ligacoes()
-        if not _ml.empty and "Status" in _ml.columns and "% Ligações" in _ml.columns:
-            _np = _ml[_ml["Status"].astype(str).str.contains("não pertence|nao pertence", case=False, na=False)]
-            if not _np.empty:
-                _pct_np = pd.to_numeric(_np["% Ligações"].astype(str).str.replace(",","."), errors="coerce").sum()
-                st.metric("📵 Telefone não pertence (7d)", f"{_pct_np:.1f}%",
-                          help="% das ligações da semana com status 'Telefone não pertence ao contato' (Mapa de Ligações)")
 
 
 # --------------------------------------------------------------------------- #
