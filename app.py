@@ -218,6 +218,16 @@ def _carregar_treino():
     return treino.carregar()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _camp_lista():
+    """Lista de campanhas com Data Inicio (menu 176) — para a aba Base."""
+    try:
+        pid = P.PROJETOS_PORTAL[PROJETO]
+        return _job(lambda pa: pa.fetch_relatorio(pid, 176)) or pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _mapa_ligacoes():
     """Mapa de Ligacoes (menu 163) agrupado por Campanha — % por status (7d)."""
@@ -677,23 +687,15 @@ if _view == "🧑‍💼 Operadores":
 if _view == "📦 Base":
     st.subheader("Saúde e consumo da base 📦")
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _camp_lista():
-        """Lista de campanhas com Data Inicio (menu 176)."""
-        try:
-            pid = P.PROJETOS_PORTAL[PROJETO]
-            return _job(lambda pa: pa.fetch_relatorio(pid, 176)) or pd.DataFrame()
-        except Exception:
-            return pd.DataFrame()
-
     _ROW_H_B = 35
     _HEADER_H_B = 38
 
     # carrega discador e campanha lista
     try:
         _, _disc_b, _ = carregar_campanhas(dt_ini, dt_fim)
-    except Exception:
+    except Exception as _e_disc:
         _disc_b = pd.DataFrame()
+        st.error(f"Erro ao carregar dados do discador: {_e_disc}")
 
     _dd_b = E.normalizar_discador(_disc_b) if not _disc_b.empty else pd.DataFrame()
     _cl   = _camp_lista()
