@@ -432,7 +432,7 @@ if not os.environ.get("AYTY_PORTAL_SENHA"):
                "conectar ao portal.")
     st.stop()
 
-_view = st.radio("Visao", ["📊 Campanhas", "🧑‍💼 Operadores", "📈 Historico"],
+_view = st.radio("Visao", ["📊 Campanhas", "🧑‍💼 Operadores", "� Base", "�📈 Historico"],
                  horizontal=True, label_visibility="collapsed")
 
 # =========================== HISTORICO ===================================== #
@@ -671,6 +671,152 @@ if _view == "🧑‍💼 Operadores":
     st.caption("Vendas/dia = cadastradas ÷ dias. 🔥 = alto volume com conversao/"
                "abordagem bem abaixo da media (possivel queima de mailing). "
                "Abordagens estimadas via tempo do TMO.")
+    st.stop()
+
+# =========================== BASE ========================================== #
+if _view == "📦 Base":
+    st.subheader("Saúde e consumo da base 📦")
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _camp_lista():
+        """Lista de campanhas com Data Inicio (menu 176)."""
+        try:
+            pid = P.PROJETOS_PORTAL[PROJETO]
+            return _job(lambda pa: pa.fetch_relatorio(pid, 176)) or pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
+
+    _ROW_H_B = 35
+    _HEADER_H_B = 38
+
+    # carrega discador e campanha lista
+    try:
+        _, _disc_b, _ = carregar_campanhas(dt_ini, dt_fim)
+    except Exception:
+        _disc_b = pd.DataFrame()
+
+    _dd_b = E.normalizar_discador(_disc_b) if not _disc_b.empty else pd.DataFrame()
+    _cl   = _camp_lista()
+
+    if _dd_b.empty or "Total da Base" not in _dd_b.columns:
+        st.info("Sem dados do discador disponíveis.")
+        st.stop()
+
+    # enriquece com nome de campanha e data inicio
+    if not _cl.empty and "Código" in _cl.columns:
+        _cl["Codigo"] = pd.to_numeric(_cl["Código"], errors="coerce")
+        _cl["Data Inicio"] = pd.to_datetime(_cl.get("Data Início"), errors="coerce")
+        _cl["Ativa"] = _cl.get("Campanha Ativa", "").astype(str).str.strip()
+        _merge_cols = ["Codigo", "Nome", "Data Inicio", "Ativa"]
+        _merge_cols = [c for c in _merge_cols if c in _cl.columns]
+        _dd_b = _dd_b.merge(_cl[_merge_cols], on="Codigo", how="left")
+    else:
+        _dd_b["Nome"] = _dd_b["Codigo"].astype(str)
+        _dd_b["Data Inicio"] = pd.NaT
+        _dd_b["Ativa"] = "?"
+
+    # metricas calculadas
+    _hoje_b = pd.Timestamp.now().normalize()
+    _dd_b["Dias ativo"] = (_hoje_b - _dd_b["Data Inicio"]).dt.days.clip(lower=1)
+    _tot = _dd_b["Total da Base"].fillna(0)
+    _disp = _dd_b["Disponiveis"].fillna(0)
+    _fin = _dd_b["Finalizados"].fillna(0)
+    _dd_b["Disponivel %"] = (100 * _disp / _tot.replace(0,1)).round(1)
+    _dd_b["Finalizado %"] = (100 * _fin / _tot.replace(0,1)).round(1)
+    _dd_b["Fin/dia"] = (_fin / _dd_b["Dias ativo"].replace(0,1)).round(1)
+    _dd_b["Dias p/esgotar"] = (_disp / _dd_b["Fin/dia"].replace(0,float("nan"))).round(0)
+    def _alerta_b(r):
+        if r.get("Finalizado %", 0) >= 80: return "🔴 Esgotando"
+        if r.get("Finalizado %", 0) >= 50: return "🟡 Atenção"
+        return "🟢 Saudável"
+    _dd_b["Alerta"] = _dd_b.apply(_alerta_b, axis=1)
+
+    # junta % nao pertence se disponivel
+    _ml_b = _mapa_ligacoes()
+    if not _ml_b.empty and "Campanha" in _ml_b.columns:
+        _ml_b["_ck"] = _ml_b["Campanha"].str.strip()
+        _dd_b["_ck"] = _dd_b.get("Nome", _dd_b["Codigo"].astype(str)).str.strip()
+        _dd_b = _dd_b.merge(_ml_b[["_ck","% Nao Pertence"]], on="_ck", how="left").drop(columns=["_ck"])
+
+    # filtra so campanhas com base real
+    _dd_b = _dd_b[_dd_b["Total da Base"].fillna(0) > 0].sort_values("Finalizado %", ascending=False)
+
+    if _dd_b.empty:
+        st.info("Sem dados de base disponíveis.")
+        st.stop()
+
+    # --- KPIs ---
+    _tot_nomes   = int(_dd_b["Total da Base"].sum())
+    _tot_disp    = int(_dd_b["Disponiveis"].sum())
+    _tot_fin     = int(_dd_b["Finalizados"].sum())
+    _fin_dia_sum = _dd_b["Fin/dia"].dropna().sum()
+    _esgotando   = int((_dd_b["Finalizado %"] >= 80).sum())
+    _atencao     = int(((_dd_b["Finalizado %"] >= 50) & (_dd_b["Finalizado %"] < 80)).sum())
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    kpi_card(k1, "Total de nomes", _fmt(_tot_nomes), f"{len(_dd_b)} campanhas", "📋", "#3b82f6")
+    kpi_card(k2, "Disponíveis restantes", _fmt(_tot_disp),
+             f"{100*_tot_disp/max(_tot_nomes,1):.0f}% do total", "✅", "#22c55e")
+    kpi_card(k3, "Consumo estimado/semana", _fmt(_fin_dia_sum * 5),
+             f"{_fmt(_fin_dia_sum * 22)}/mês", "📉", "#38bdf8")
+    kpi_card(k4, "🔴 Esgotando (>80%)", str(_esgotando), "finalizados ≥ 80%", "🔴", "#ff4b5c")
+    kpi_card(k5, "🟡 Atenção (50-80%)", str(_atencao), "finalizados 50-80%", "🟡", "#ffb020")
+    st.markdown("")
+
+    # --- gráfico stacked ---
+    st.markdown("### Composição da base por campanha")
+    _gc_b = _dd_b.sort_values("Finalizado %", ascending=True).copy()
+    _gc_b["Nome_curto"] = _gc_b.get("Nome", _gc_b["Codigo"].astype(str)).str.slice(0, 35)
+    _livres = _gc_b.get("Livres", pd.Series(0, index=_gc_b.index)).fillna(0)
+    _fig_b = go.Figure()
+    if _livres.sum() > 0:
+        _fig_b.add_bar(y=_gc_b["Nome_curto"], x=_livres, name="Livres (virgens)",
+                       orientation="h", marker_color="#22c55e",
+                       hovertemplate="%{y}<br>Livres: %{x:,.0f}<extra></extra>")
+    _fig_b.add_bar(y=_gc_b["Nome_curto"],
+                   x=_gc_b["Disponiveis"] - _livres, name="Em trabalho (disp.)",
+                   orientation="h", marker_color="#38bdf8",
+                   hovertemplate="%{y}<br>Em trabalho: %{x:,.0f}<extra></extra>")
+    _fig_b.add_bar(y=_gc_b["Nome_curto"], x=_gc_b["Finalizados"], name="Finalizados",
+                   orientation="h", marker_color="#ff4b5c",
+                   hovertemplate="%{y}<br>Finalizados: %{x:,.0f}<extra></extra>")
+    _fig_b.update_layout(
+        barmode="stack", height=max(350, len(_gc_b)*30),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#c3cad6", margin=dict(t=20, b=10, l=10, r=10),
+        legend=dict(orientation="h", y=1.04),
+        xaxis=dict(title="Registros", gridcolor="#232a38"), yaxis=dict(title=""))
+    st.plotly_chart(_fig_b, use_container_width=True)
+
+    # --- tabela ---
+    st.markdown("### Detalhamento por campanha")
+    _show_b = _dd_b[["Nome", "Ativa", "Dias ativo", "Total da Base", "Disponiveis",
+                      "Disponivel %", "Finalizado %", "Fin/dia", "Dias p/esgotar",
+                      "Penetracao %", "% Nao Pertence", "Alerta"]].copy()
+    _show_b = _show_b.rename(columns={
+        "Nome": "Campanha", "Total da Base": "Total", "Disponiveis": "Disponíveis",
+        "Disponivel %": "Disp %", "Finalizado %": "Fin %", "Penetracao %": "Penetração %",
+        "% Nao Pertence": "% Não Pertence"})
+    _show_b = _show_b[[c for c in _show_b.columns if c in _show_b.columns]]
+    _h_b = min(_ROW_H_B * len(_show_b) + _HEADER_H_B, 500)
+    _sty_b = _show_b.style
+    for _gc in ["Disp %", "Penetração %"]:
+        if _gc in _show_b.columns:
+            _sty_b = _sty_b.apply(grad_col, subset=[_gc], axis=0)
+    if "Fin %" in _show_b.columns:
+        _sty_b = _sty_b.apply(lambda s: [
+            f"background-color:rgba(255,75,92,{min(float(str(v) or 0)/100,0.7):.2f})"
+            if str(v) not in ("nan","None","") else "" for v in s],
+            subset=["Fin %"], axis=0)
+    if "% Não Pertence" in _show_b.columns:
+        _sty_b = _sty_b.apply(lambda s: [
+            f"background-color:rgba(255,75,92,{min(float(str(v) or 0)/40,0.7):.2f})"
+            if str(v) not in ("nan","None","") else "" for v in s],
+            subset=["% Não Pertence"], axis=0)
+    _sty_b = fmt_tabela(_sty_b, _show_b)
+    st.dataframe(_sty_b, use_container_width=True, hide_index=True, height=_h_b)
+    st.download_button("⬇️ Exportar (CSV)", _show_b.to_csv(index=False).encode("utf-8-sig"),
+                       "base_prime.csv", "text/csv")
     st.stop()
 
 # =========================== CAMPANHAS ===================================== #
