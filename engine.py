@@ -301,12 +301,11 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
         for i in idx:
             cv = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
             cvc = max(cv, 0.1) ** exp
-            # fator volume ENXUTO (0.85-1.2): a base disponivel e' so um leve
-            # desempate; quem manda e' a conversao (cvc).
-            vf = min(1.2, max(0.85, (max(float(disp_abs.loc[i]), 1.0) / vol_med) ** 0.25))
-            # aplica bias do analista (extraido da conversa com a IA)
+            # Fator volume removido: com discador preditivo inteligente, base
+            # pequena nao e' penalidade (o sistema redistribui automaticamente
+            # quando a campanha esgota). Peso sugerido = conversao pura.
             b = float(_bias.get(_cods[i], 1.0))
-            merit[i] = cvc * vf * b
+            merit[i] = cvc * b
         soma = sum(merit.values()) or 1.0
         # mediana de conversao do grupo: so bloqueia subida se conv estiver
         # SIGNIFICATIVAMENTE abaixo (< conv_med_frac * mediana, padrao 70%).
