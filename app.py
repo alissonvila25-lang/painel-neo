@@ -240,14 +240,19 @@ def _mapa_ligacoes():
             df[c] = df[c].astype(str)
         if "Campanha" not in df.columns or "Status" not in df.columns:
             return _empty
-        pct_col = next((c for c in df.columns if "liga" in c.lower() and "%" in c), None)
-        if not pct_col:
+        # quantidade de ligacoes (coluna numerica principal)
+        qtd_col = next((c for c in df.columns if "qtd" in c.lower() and "liga" in c.lower()), None)
+        if not qtd_col:
             return _empty
+        df[qtd_col] = pd.to_numeric(df[qtd_col].str.replace(",", ".", regex=False), errors="coerce").fillna(0)
+        # total de ligacoes por campanha (denominador correto)
+        total_camp = df.groupby("Campanha")[qtd_col].sum().rename("total_lig")
+        # filtra status "nao pertence" e calcula % correto por campanha
         nao_p = df[df["Status"].str.contains("pertence", case=False, na=False)].copy()
         if nao_p.empty:
             return _empty
-        nao_p["% Nao Pertence"] = pd.to_numeric(
-            nao_p[pct_col].str.replace(",", ".", regex=False), errors="coerce")
+        nao_p = nao_p.join(total_camp, on="Campanha")
+        nao_p["% Nao Pertence"] = (nao_p[qtd_col] / nao_p["total_lig"] * 100).round(1)
         return nao_p[["Campanha", "% Nao Pertence"]].dropna()
     except Exception:
         return _empty
