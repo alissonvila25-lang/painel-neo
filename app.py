@@ -813,6 +813,32 @@ kpi_card(k4, "Campanhas rodando", f"{kpi['rodando']}", "com discagem", "⚙️",
 kpi_card(k5, "Criticas", f"{kpi['criticas']}", "acao urgente", "🚨", "#ff4b5c")
 kpi_card(k6, "Oportunidades", f"{kpi['oportunidades']}", "escalar peso", "🚀", "#22c55e")
 
+# --- Projeção de vendas ao final do turno (17h BRT) ---
+_agora_p   = now_br()
+_ini_op    = _agora_p.replace(hour=8,  minute=0, second=0, microsecond=0)
+_fim_op    = _agora_p.replace(hour=17, minute=0, second=0, microsecond=0)
+_h_dec     = max(0.0, (_agora_p - _ini_op).total_seconds() / 3600)
+_h_rest    = max(0.0, (_fim_op  - _agora_p).total_seconds() / 3600)
+_cad_atual = kpi["cadastradas"]
+if _h_dec > 0.5 and _agora_p < _fim_op:
+    _taxa_h = _cad_atual / _h_dec
+    _proj   = int(round(_cad_atual + _taxa_h * _h_rest))
+    _proj_label = f"📈 {_fmt(_proj)} até 17h"
+    _proj_sub   = f"{_taxa_h:.0f} vendas/h · {_h_rest:.1f}h restantes"
+elif _agora_p >= _fim_op:
+    _proj_label, _proj_sub = f"✅ {_fmt(_cad_atual)}", "Turno encerrado"
+else:
+    _proj_label, _proj_sub = "—", "Aguardando dados (início de turno)"
+
+if _h_dec > 0.1 or _agora_p >= _fim_op:
+    st.markdown(
+        f"<div style='background:linear-gradient(90deg,#0f2036,#0b0e14);border:1px solid #1e3a5f;"
+        f"border-radius:10px;padding:10px 18px;display:flex;align-items:center;gap:18px;margin-bottom:10px'>"
+        f"<span style='color:#8b95a7;font-size:.82rem'>Projeção de vendas (17h)</span>"
+        f"<span style='color:#38bdf8;font-weight:800;font-size:1.2rem'>{_proj_label}</span>"
+        f"<span style='color:#8b95a7;font-size:.8rem'>{_proj_sub}</span>"
+        f"</div>", unsafe_allow_html=True)
+
 st.markdown("")
 
 # --- Saude da base (discador) ---
