@@ -220,18 +220,37 @@ def _carregar_treino():
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _mapa_ligacoes():
-    """Mapa de Ligacoes (menu 163): % por status da semana (7d)."""
+    """Mapa de Ligacoes (menu 163) agrupado por Campanha — % por status (7d)."""
+    _empty = pd.DataFrame(columns=["Campanha", "% Nao Pertence"])
     try:
         pid = P.PROJETOS_PORTAL[PROJETO]
         _r  = P.RELATORIOS[pid]
         if "mapa_ligacoes" not in _r:
-            return pd.DataFrame()
+            return _empty
         df = _job(lambda pa: pa.fetch_relatorio(
             pid, _r["mapa_ligacoes"],
-            today_br() - timedelta(days=7), today_br() - timedelta(days=1)))
-        return df if df is not None else pd.DataFrame()
+            today_br() - timedelta(days=7), today_br() - timedelta(days=1),
+            extra_fields={
+                "ctl15$Lst_lstIdGroupByRpt": "21",   # agrupar por Campanha
+                "ctl15$Hdn_lstIdGroupByRpt": "false",
+            }))
+        if df is None or df.empty:
+            return _empty
+        for c in df.columns:
+            df[c] = df[c].astype(str)
+        if "Campanha" not in df.columns or "Status" not in df.columns:
+            return _empty
+        pct_col = next((c for c in df.columns if "liga" in c.lower() and "%" in c), None)
+        if not pct_col:
+            return _empty
+        nao_p = df[df["Status"].str.contains("pertence", case=False, na=False)].copy()
+        if nao_p.empty:
+            return _empty
+        nao_p["% Nao Pertence"] = pd.to_numeric(
+            nao_p[pct_col].str.replace(",", ".", regex=False), errors="coerce")
+        return nao_p[["Campanha", "% Nao Pertence"]].dropna()
     except Exception:
-        return pd.DataFrame()
+        return _empty
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -770,12 +789,12 @@ if disc is not None and not disc.empty:
             "Campanha", ascending=True)
         # junta % Nao Pertence por campanha
         _ml = _mapa_ligacoes()
-        if not _ml.empty:
+        if not _ml.empty and "Campanha" in _ml.columns and "% Nao Pertence" in _ml.columns:
             _ml["_camp_curto"] = _ml["Campanha"].str.replace(r"^\d+ - ", "", regex=True).str.strip()
             _dd["_camp_curto"]  = _dd["Campanha"].str.replace(r"^\d+ - ", "", regex=True).str.strip()
             _dd = _dd.merge(_ml[["_camp_curto", "% Nao Pertence"]],
                             on="_camp_curto", how="left").drop(columns=["_camp_curto"])
-            _dd["% Nao Pertence"] = _dd["% Nao Pertence"].round(1)
+            _dd["% Nao Pertence"] = pd.to_numeric(_dd["% Nao Pertence"], errors="coerce").round(1)
         _dd_h = min(_ROW_H * len(_dd) + _HEADER_H, 400)
         _dsty = _dd.style
         for _gc in ["Hit Rate %", "Penetracao %", "Disponiveis"]:
