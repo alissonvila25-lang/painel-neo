@@ -442,7 +442,7 @@ if not os.environ.get("AYTY_PORTAL_SENHA"):
                "conectar ao portal.")
     st.stop()
 
-_view = st.radio("Visao", ["📊 Campanhas", "🧑‍💼 Operadores", "� Base", "�📈 Historico"],
+_view = st.radio("Visao", ["📊 Campanhas", "🧑‍💼 Operadores", "📦 Base", "📈 Historico"],
                  horizontal=True, label_visibility="collapsed")
 
 # =========================== HISTORICO ===================================== #
