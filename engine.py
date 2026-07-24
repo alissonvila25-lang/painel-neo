@@ -267,23 +267,74 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
 
 def _sugerir_pesos(df: pd.DataFrame, thr: dict,
                    biases: dict | None = None) -> pd.Series:
-    """Redistribui o peso total da curva entre campanhas ativas por merito
-    (conversao comprimida x base disponivel). biases={codigo:multiplicador}
-    aplicado ao merito ANTES da redistribuicao; bias>1 tambem relaxa a trava
-    de mediana (humano decidiu subir intencionalmente)."""
+    """Ranking por conversao relativa: peso = media_grupo × (conv/conv_media)^exp.
+
+    Filosofia: discador preditivo inteligente redistribui automaticamente quando
+    uma campanha esgota — base pequena nao e' penalidade. Pesos sao determinados
+    pela conversao relativa de cada campanha no grupo, independentemente do
+    orcamento total (nao e' soma-zero). Isso gera escalonamento simples e
+    previsivel: melhor conversao = mais peso, proporcionalmente.
+    """
     _bias = biases or {}
     n = len(df)
     out = pd.Series([None] * n, index=df.index, dtype="object")
     ref = pd.to_numeric(df.get("Peso Disc"), errors="coerce")
     ref = ref.fillna(pd.to_numeric(df.get("Peso Config"), errors="coerce"))
     conv = pd.to_numeric(df.get("% Conversao"), errors="coerce")
-    disp = pd.to_numeric(df.get("Disponivel %"), errors="coerce")
-    disp_abs = pd.to_numeric(df.get("Disponiveis"), errors="coerce").fillna(0)
-    rod = df["Rodando"] if "Rodando" in df.columns else pd.Series(False, index=df.index)
-    exp = float(thr.get("peso_expoente", 0.6))
-    rf = float(thr.get("peso_ramp_frac", 0.4))
+    rod  = df["Rodando"] if "Rodando" in df.columns else pd.Series(False, index=df.index)
+    exp  = float(thr.get("peso_expoente", 1.2))
+    rf   = float(thr.get("peso_ramp_frac", 0.6))
     rmin = int(thr.get("peso_ramp_min", 3))
-    cb = float(thr.get("conv_baixa", 1.0))
+    cb   = float(thr.get("conv_baixa", 1.0))
+    conv_med_frac = float(thr.get("conv_med_frac", 0.70))
+    _cods = {i: int(df.at[i, "Codigo"]) if "Codigo" in df.columns else 0
+             for i in df.index}
+
+    for curva, g in df.groupby(df["Curva"].fillna("")):
+        idx = [i for i in g.index
+               if pd.notna(ref.loc[i]) and ref.loc[i] > 0 and bool(rod.loc[i])]
+        if len(idx) < 2:
+            continue
+        # referências do grupo
+        media_peso = float(ref.loc[idx].mean())
+        _cvs = [float(conv.loc[i]) for i in idx if pd.notna(conv.loc[i])]
+        conv_media = float(pd.Series(_cvs).mean()) if _cvs else 0.0
+        if conv_media <= 0:
+            continue
+        conv_med_trava = conv_media * conv_med_frac
+
+        for i in idx:
+            cv  = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
+            b   = float(_bias.get(_cods[i], 1.0))
+            # peso proporcional à conversao relativa (ranking puro)
+            alvo = int(round(media_peso * ((max(cv, 0.1) / conv_media) ** exp) * b))
+            alvo = max(1, alvo)
+            # ramp: limita mudanca por rodada (evita salto brusco)
+            atual = int(ref.loc[i])
+            step  = max(rmin, int(round(atual * rf)))
+            alvo  = min(alvo, atual + step)
+            alvo  = max(alvo, atual - step)
+            # trava: conversao genuinamente ruim nao sobe
+            cvv = conv.loc[i]
+            if alvo > atual and pd.notna(cvv) and (
+                    float(cvv) < cb or float(cvv) < conv_med_trava) and b <= 1.0:
+                alvo = atual
+            out.at[i] = alvo
+
+    # fallback: campanhas fora do pool (sozinha na curva, sem peso etc.)
+    for i in df.index:
+        if out.at[i] is not None:
+            continue
+        pv = ref.loc[i]
+        if pd.isna(pv) or pv <= 0:
+            continue
+        atual = int(pv)
+        cvv   = conv.loc[i]
+        if pd.notna(cvv) and float(cvv) < cb:
+            out.at[i] = max(1, int(round(atual * 0.7)))
+        else:
+            out.at[i] = atual
+    return pd.to_numeric(out, errors="coerce")
 
     for curva, g in df.groupby(df["Curva"].fillna("")):
         idx = [i for i in g.index
