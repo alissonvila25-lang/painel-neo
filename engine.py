@@ -302,13 +302,19 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
         if len(idx) < 2:
             continue
 
-        # referências do grupo
-        _cvs = [float(conv.loc[i]) for i in idx if pd.notna(conv.loc[i])]
+        # referências do grupo — exclui base zerada do calculo de escala
+        _active = [i for i in idx
+                   if float(disp_abs.loc[i]) > 0
+                   and (pd.isna(disp_pct.loc[i]) or float(disp_pct.loc[i]) >= disp_zerada_pct)]
+        if not _active:
+            continue
+        _cvs = [float(conv.loc[i]) for i in _active if pd.notna(conv.loc[i])]
         conv_max_g  = max(_cvs) if _cvs else 1.0
         conv_media  = float(pd.Series(_cvs).mean()) if _cvs else 0.0
         conv_med_g  = float(pd.Series(_cvs).median()) if _cvs else 0.0
         conv_trava  = conv_med_g * conv_med_frac
-        max_peso_g  = max(int(ref.loc[idx].max()), 5)  # teto = maior peso atual (min 5)
+        # ancora no maior peso das campanhas ATIVAS (nao em zeradas/historicas)
+        max_peso_g  = max(int(ref.loc[_active].max()), 5)
         if conv_max_g <= 0:
             continue
 
@@ -333,10 +339,15 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
             # REGRA 3: rampa assimetrica
             atual = int(ref.loc[i])
             if alvo < atual:
+                # queda: permite cair rapido (correcao mais agressiva)
                 step = max(rmin, int(round(atual * rf_down)))
                 alvo = max(alvo, atual - step)
             else:
-                step = max(rmin, int(round(atual * rf_up)))
+                # subida: se o peso atual e muito baixo vs alvo (< 60%), permite salto maior
+                if atual > 0 and alvo > atual * 1.6:
+                    step = max(rmin, int(round(alvo * 0.5)))   # pode subir 50% do alvo
+                else:
+                    step = max(rmin, int(round(atual * rf_up)))
                 alvo = min(alvo, atual + step)
 
             # REGRA 4: conv ruim nao sobe (exceto bias positivo do analista)
