@@ -267,26 +267,32 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
 
 def _sugerir_pesos(df: pd.DataFrame, thr: dict,
                    biases: dict | None = None) -> pd.Series:
-    """Ranking por conversao relativa: peso = media_grupo × (conv/conv_media)^exp.
+    """Ranking por conversao relativa ao melhor do grupo.
 
-    Filosofia: discador preditivo inteligente redistribui automaticamente quando
-    uma campanha esgota — base pequena nao e' penalidade. Pesos sao determinados
-    pela conversao relativa de cada campanha no grupo, independentemente do
-    orcamento total (nao e' soma-zero). Isso gera escalonamento simples e
-    previsivel: melhor conversao = mais peso, proporcionalmente.
+    Regras:
+    - Base zerada (Disponivel% < disp_zerada_pct ou Disponiveis=0) → 0
+    - Outros: peso = max_grupo × (conv / conv_max_grupo)^expoente × bias
+    - Rampa ASSIMETRICA: queda ate 80%/rodada (correcao rapida),
+      subida ate peso_ramp_frac/rodada (conservadora).
+    - Conversao ruim (< conv_baixa ou < conv_med_frac×mediana) nao sobe.
     """
     _bias = biases or {}
     n = len(df)
     out = pd.Series([None] * n, index=df.index, dtype="object")
-    ref = pd.to_numeric(df.get("Peso Disc"), errors="coerce")
-    ref = ref.fillna(pd.to_numeric(df.get("Peso Config"), errors="coerce"))
-    conv = pd.to_numeric(df.get("% Conversao"), errors="coerce")
-    rod  = df["Rodando"] if "Rodando" in df.columns else pd.Series(False, index=df.index)
-    exp  = float(thr.get("peso_expoente", 1.2))
-    rf   = float(thr.get("peso_ramp_frac", 0.6))
-    rmin = int(thr.get("peso_ramp_min", 3))
-    cb   = float(thr.get("conv_baixa", 1.0))
-    conv_med_frac = float(thr.get("conv_med_frac", 0.70))
+    ref   = pd.to_numeric(df.get("Peso Disc"), errors="coerce")
+    ref   = ref.fillna(pd.to_numeric(df.get("Peso Config"), errors="coerce"))
+    conv  = pd.to_numeric(df.get("% Conversao"),  errors="coerce")
+    disp_pct = pd.to_numeric(df.get("Disponivel %"), errors="coerce")
+    disp_abs = pd.to_numeric(df.get("Disponiveis"),  errors="coerce").fillna(0)
+    rod   = df["Rodando"] if "Rodando" in df.columns else pd.Series(False, index=df.index)
+
+    exp              = float(thr.get("peso_expoente",      1.2))
+    rf_up            = float(thr.get("peso_ramp_frac",     0.6))   # subida max por rodada
+    rf_down          = float(thr.get("peso_ramp_down_frac", 0.8))  # queda max por rodada
+    rmin             = int(  thr.get("peso_ramp_min",       3))
+    cb               = float(thr.get("conv_baixa",          1.0))
+    conv_med_frac    = float(thr.get("conv_med_frac",       0.70))
+    disp_zerada_pct  = float(thr.get("disp_zerada_pct",    2.0))   # % abaixo -> peso 0
     _cods = {i: int(df.at[i, "Codigo"]) if "Codigo" in df.columns else 0
              for i in df.index}
 
@@ -295,109 +301,66 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
                if pd.notna(ref.loc[i]) and ref.loc[i] > 0 and bool(rod.loc[i])]
         if len(idx) < 2:
             continue
+
         # referências do grupo
-        media_peso = float(ref.loc[idx].mean())
         _cvs = [float(conv.loc[i]) for i in idx if pd.notna(conv.loc[i])]
-        conv_media = float(pd.Series(_cvs).mean()) if _cvs else 0.0
-        if conv_media <= 0:
+        conv_max_g  = max(_cvs) if _cvs else 1.0
+        conv_media  = float(pd.Series(_cvs).mean()) if _cvs else 0.0
+        conv_med_g  = float(pd.Series(_cvs).median()) if _cvs else 0.0
+        conv_trava  = conv_med_g * conv_med_frac
+        max_peso_g  = max(int(ref.loc[idx].max()), 5)  # teto = maior peso atual (min 5)
+        if conv_max_g <= 0:
             continue
-        conv_med_trava = conv_media * conv_med_frac
 
         for i in idx:
-            cv  = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
             b   = float(_bias.get(_cods[i], 1.0))
-            # peso proporcional à conversao relativa (ranking puro)
-            alvo = int(round(media_peso * ((max(cv, 0.1) / conv_media) ** exp) * b))
-            alvo = max(1, alvo)
-            # ramp: limita mudanca por rodada (evita salto brusco)
-            atual = int(ref.loc[i])
-            step  = max(rmin, int(round(atual * rf)))
-            alvo  = min(alvo, atual + step)
-            alvo  = max(alvo, atual - step)
-            # trava: conversao genuinamente ruim nao sobe
-            cvv = conv.loc[i]
-            if alvo > atual and pd.notna(cvv) and (
-                    float(cvv) < cb or float(cvv) < conv_med_trava) and b <= 1.0:
-                alvo = atual
-            out.at[i] = alvo
 
-    # fallback: campanhas fora do pool (sozinha na curva, sem peso etc.)
+            # REGRA 1: base zerada → 0 (independente da conversao)
+            dp  = float(disp_pct.loc[i]) if pd.notna(disp_pct.loc[i]) else 100.0
+            da  = float(disp_abs.loc[i])
+            if da <= 0 or dp < disp_zerada_pct:
+                out.at[i] = 0
+                continue
+
+            cv  = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
+            cvv = conv.loc[i]
+
+            # REGRA 2: ranking relativo ao melhor do grupo
+            frac = (max(cv, 0.1) / conv_max_g) ** exp
+            alvo = int(round(max_peso_g * frac * b))
+            alvo = max(0, alvo)
+
+            # REGRA 3: rampa assimetrica
+            atual = int(ref.loc[i])
+            if alvo < atual:
+                step = max(rmin, int(round(atual * rf_down)))
+                alvo = max(alvo, atual - step)
+            else:
+                step = max(rmin, int(round(atual * rf_up)))
+                alvo = min(alvo, atual + step)
+
+            # REGRA 4: conv ruim nao sobe (exceto bias positivo do analista)
+            if alvo > atual and pd.notna(cvv) and (
+                    float(cvv) < cb or float(cvv) < conv_trava) and b <= 1.0:
+                alvo = atual
+
+            out.at[i] = max(0, alvo)
+
+    # fallback: campanhas fora do pool
     for i in df.index:
         if out.at[i] is not None:
             continue
         pv = ref.loc[i]
         if pd.isna(pv) or pv <= 0:
             continue
-        atual = int(pv)
-        cvv   = conv.loc[i]
-        if pd.notna(cvv) and float(cvv) < cb:
-            out.at[i] = max(1, int(round(atual * 0.7)))
+        da  = float(disp_abs.loc[i]) if i in disp_abs.index else 1.0
+        dp  = float(disp_pct.loc[i]) if pd.notna(disp_pct.loc[i]) else 100.0
+        if da <= 0 or dp < disp_zerada_pct:
+            out.at[i] = 0
+        elif pd.notna(conv.loc[i]) and float(conv.loc[i]) < cb:
+            out.at[i] = max(1, int(round(float(pv) * 0.7)))
         else:
-            out.at[i] = atual
-    return pd.to_numeric(out, errors="coerce")
-
-    for curva, g in df.groupby(df["Curva"].fillna("")):
-        idx = [i for i in g.index
-               if pd.notna(ref.loc[i]) and ref.loc[i] > 0 and bool(rod.loc[i])
-               and (pd.isna(disp.loc[i]) or disp.loc[i] >= 3)]
-        if len(idx) < 2:
-            continue
-        budget = float(ref.loc[idx].sum())
-        teto = int(round(ref.loc[idx].max() * float(thr.get("peso_teto_frac", 2.0))))
-        vol_med = float(pd.Series([max(float(disp_abs.loc[i]), 0.0)
-                                   for i in idx]).median()) or 1.0
-        merit = {}
-        _cods = {i: int(df.at[i, "Codigo"]) if "Codigo" in df.columns else 0
-                 for i in idx}
-        for i in idx:
-            cv = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
-            cvc = max(cv, 0.1) ** exp
-            # Fator volume removido: com discador preditivo inteligente, base
-            # pequena nao e' penalidade (o sistema redistribui automaticamente
-            # quando a campanha esgota). Peso sugerido = conversao pura.
-            b = float(_bias.get(_cods[i], 1.0))
-            merit[i] = cvc * b
-        soma = sum(merit.values()) or 1.0
-        # mediana de conversao do grupo: so bloqueia subida se conv estiver
-        # SIGNIFICATIVAMENTE abaixo (< conv_med_frac * mediana, padrao 70%).
-        # Isso evita bloquear 3.4% ou 4% so pq uma campanha-estrela (8%+)
-        # puxa a mediana para cima.
-        _cvs = [float(conv.loc[i]) for i in idx if pd.notna(conv.loc[i])]
-        conv_med = float(pd.Series(_cvs).median()) if _cvs else 0.0
-        conv_med_frac = float(thr.get("conv_med_frac", 0.70))
-        conv_med_trava = conv_med * conv_med_frac  # limiar real de bloqueio
-        for i in idx:
-            alvo = int(round(min(max(budget * merit[i] / soma, 1), teto)))
-            atual = int(ref.loc[i])
-            step = max(rmin, int(round(atual * rf)))
-            alvo = min(alvo, atual + step)
-            alvo = max(alvo, atual - step)
-            cvv = conv.loc[i]
-            # trava de subida: bloqueia SOMENTE se a conversao for ruim de verdade
-            # (< conv_baixa absoluto) OU significativamente abaixo da mediana (< 70%).
-            # Bias do analista > 1.0 sempre libera a subida.
-            b = float(_bias.get(_cods[i], 1.0))
-            if alvo > atual and pd.notna(cvv) and (
-                    float(cvv) < cb or float(cvv) < conv_med_trava) and b <= 1.0:
-                alvo = atual
-            out.at[i] = alvo
-    # fallback: toda campanha com peso de referencia recebe uma sugestao (fora
-    # do pool: sozinha na curva, base esgotada, etc.), para nunca ficar vazia.
-    for i in df.index:
-        if out.at[i] is not None:
-            continue
-        pv = ref.loc[i]
-        if pd.isna(pv) or pv <= 0:
-            continue
-        atual = int(pv)
-        cvv = conv.loc[i]
-        dp = disp.loc[i]
-        if pd.notna(dp) and dp < 3:
-            out.at[i] = max(1, int(round(atual * 0.5)))   # base esgotada -> reduzir
-        elif pd.notna(cvv) and float(cvv) < cb:
-            out.at[i] = max(1, int(round(atual * 0.7)))   # conversao ruim -> reduzir
-        else:
-            out.at[i] = atual                              # manter
+            out.at[i] = int(pv)
     return pd.to_numeric(out, errors="coerce")
 
 

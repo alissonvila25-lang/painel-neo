@@ -28,11 +28,11 @@ THRESHOLDS: dict[str, float] = {
     "hit_rate_baixo": 3.0,    # hit rate baixo no discador (%)
     "cancel_alto": 0.30,      # razao de cancelamento alta
     # calibracao do peso sugerido
-    "peso_ramp_frac": 0.6,    # frac do peso atual que pode mudar por rodada (era 0.4)
-    "peso_ramp_min": 3,
-    "peso_teto_frac": 2.0,    # teto = max_do_grupo * frac (era 1.2x, agora 2.0x)
-    "peso_expoente": 1.2,   # >1 faz a CONVERSAO mandar (nao so reverter a media)
-    "conv_med_frac": 0.70,  # so bloqueia subida se conv < 70% da mediana do grupo
-                             # (evita bloquear 3.4% so pq a mediana e 3.5% por causa
-                             # de uma campanha-estrela com 8%+)
+    "peso_ramp_frac":      0.6,    # subida max por rodada
+    "peso_ramp_down_frac": 0.8,    # queda max por rodada (correcao mais rapida)
+    "peso_ramp_min":       3,
+    "peso_teto_frac":      2.0,
+    "peso_expoente":       1.2,
+    "conv_med_frac":       0.70,
+    "disp_zerada_pct":     2.0,    # disponivel% abaixo disso → peso sugerido = 0
 }
