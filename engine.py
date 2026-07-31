@@ -267,23 +267,25 @@ def analisar(perf: pd.DataFrame, disc: pd.DataFrame, cfg: pd.DataFrame,
 
 def _sugerir_pesos(df: pd.DataFrame, thr: dict,
                    biases: dict | None = None) -> pd.Series:
-    """Ajuste incremental de peso baseado na conversao relativa a mediana do grupo.
+    """Sugestao de peso baseada em limiares absolutos de conversao.
 
-    Regras:
-    - Base zerada (Disponivel% < disp_zerada_pct ou Disponiveis=0) → 0
-    - Outros: alvo = peso_atual × (conv / mediana_grupo) × bias
-    - Variacao limitada a ±30% do peso atual por rodada (evita saltos bruscos)
-    - Conversao ruim (< conv_baixa) nao sobe (exceto bias positivo do analista)
+    Cada campanha e avaliada individualmente contra metas fixas (conv_alta, conv_baixa),
+    sem depender de comparacoes com outras campanhas (evita distorcoes de mediana).
+
+    Zonas de conversao:
+    - conv >= conv_alta (3%): aumenta ate +30%/rodada
+    - conv em [conv_baixa, conv_alta): zona cinza, ajuste linear de 0 a -30%
+    - conv < conv_baixa (1%): reduz 30%/rodada
+    - Base zerada (disp% < 2% ou disp=0) → 0
+    - disp < disp_baixa_pct (10%): nao permite aumento de peso
     - Cap: sugestao maxima = 50
     """
     _bias = biases or {}
-    n = len(df)
-    out = pd.Series([None] * n, index=df.index, dtype="object")
-    # Usa Peso Config como referencia primaria (mesma prioridade do analisar())
-    ref   = pd.to_numeric(df.get("Peso Config"), errors="coerce")
-    ref   = ref.fillna(pd.to_numeric(df.get("Peso Disc"), errors="coerce"))
-    conv  = pd.to_numeric(df.get("% Conversao"),  errors="coerce")
-    disp_abs = pd.to_numeric(df.get("Disponiveis"),  errors="coerce").fillna(0)
+    out = pd.Series([None] * len(df), index=df.index, dtype="object")
+    ref      = pd.to_numeric(df.get("Peso Config"), errors="coerce")
+    ref      = ref.fillna(pd.to_numeric(df.get("Peso Disc"), errors="coerce"))
+    conv     = pd.to_numeric(df.get("% Conversao"), errors="coerce")
+    disp_abs = pd.to_numeric(df.get("Disponiveis"), errors="coerce").fillna(0)
     if "Disponivel %" in df.columns:
         disp_pct = pd.to_numeric(df["Disponivel %"], errors="coerce")
     else:
@@ -292,75 +294,52 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
     rod = df["Rodando"] if "Rodando" in df.columns else pd.Series(False, index=df.index)
 
     cb              = float(thr.get("conv_baixa",    1.0))
+    ca              = float(thr.get("conv_alta",     3.0))
     disp_zerada_pct = float(thr.get("disp_zerada_pct", 2.0))
-    max_step        = 0.30   # variacao maxima por rodada (30% do peso atual)
+    disp_baixa_pct  = float(thr.get("disp_baixa_pct", 10.0))
 
     _cods = {i: int(df.at[i, "Codigo"]) if "Codigo" in df.columns else 0
              for i in df.index}
 
-    for curva, g in df.groupby(df["Curva"].fillna("")):
-        idx = [i for i in g.index
-               if pd.notna(ref.loc[i]) and ref.loc[i] > 0 and bool(rod.loc[i])]
-        if len(idx) < 2:
-            continue
-
-        _active = [i for i in idx
-                   if float(disp_abs.loc[i]) > 0
-                   and (pd.isna(disp_pct.loc[i]) or float(disp_pct.loc[i]) >= disp_zerada_pct)]
-        if not _active:
-            continue
-
-        _cvs = [float(conv.loc[i]) for i in _active
-                if pd.notna(conv.loc[i]) and float(conv.loc[i]) > 0]
-        if not _cvs:
-            continue
-        conv_med = float(pd.Series(_cvs).median())
-        if conv_med <= 0:
-            continue
-
-        for i in idx:
-            b  = float(_bias.get(_cods[i], 1.0))
-            da = float(disp_abs.loc[i]) if pd.notna(disp_abs.loc[i]) else 0.0
-            dp = float(disp_pct.loc[i]) if pd.notna(disp_pct.loc[i]) else 100.0
-
-            # Base zerada → 0
-            if da <= 0 or dp < disp_zerada_pct:
-                out.at[i] = 0
-                continue
-
-            atual = float(ref.loc[i])
-            cv    = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
-
-            # Alvo ideal: peso proporcional a conversao relativa a mediana
-            fator      = (cv / conv_med) * b if conv_med > 0 else 1.0
-            alvo_ideal = atual * fator
-
-            # Limita variacao a ±30% do peso atual por rodada
-            alvo = max(atual * (1.0 - max_step),
-                       min(atual * (1.0 + max_step), alvo_ideal))
-            alvo = int(round(alvo))
-
-            # Nao sobe se conversao ruim (exceto bias positivo do analista)
-            if alvo > int(atual) and cv < cb and b <= 1.0:
-                alvo = int(atual)
-
-            out.at[i] = max(1, min(alvo, 50))
-
-    # Fallback: campanhas fora do pool (grupo com 1 campanha, base zerada, etc.)
     for i in df.index:
-        if out.at[i] is not None:
-            continue
         pv = ref.loc[i]
         if pd.isna(pv) or pv <= 0:
-            continue
-        da = float(disp_abs.loc[i]) if i in disp_abs.index else 1.0
+            continue          # sem peso de referencia: sem sugestao
+        if not bool(rod.loc[i]):
+            continue          # campanha parada: sem sugestao
+
+        da = float(disp_abs.loc[i]) if pd.notna(disp_abs.loc[i]) else 0.0
         dp = float(disp_pct.loc[i]) if pd.notna(disp_pct.loc[i]) else 100.0
+
+        # Base zerada → 0
         if da <= 0 or dp < disp_zerada_pct:
             out.at[i] = 0
-        elif pd.notna(conv.loc[i]) and float(conv.loc[i]) < cb:
-            out.at[i] = max(1, int(round(float(pv) * 0.8)))
+            continue
+
+        atual = float(pv)
+        cv    = float(conv.loc[i]) if pd.notna(conv.loc[i]) else 0.0
+        b     = float(_bias.get(_cods[i], 1.0))
+
+        # Fator de ajuste baseado em limiares absolutos
+        if cv >= ca:
+            # Acima do alvo: sobe ate +30%
+            fator = 1.0 + 0.3 * min(1.0, (cv - ca) / ca)
+        elif cv >= cb:
+            # Zona intermediaria: linear de 1.0 (em ca) ate 0.7 (em cb)
+            fator = 0.7 + 0.3 * (cv - cb) / max(ca - cb, 0.01)
         else:
-            out.at[i] = int(pv)
+            # Abaixo do minimo: queda maxima de 30%
+            fator = 0.7
+
+        # Base com pouco disponivel: nao permite aumento
+        if dp < disp_baixa_pct:
+            fator = min(fator, 1.0)
+
+        # Aplica bias do analista (copiloto IA)
+        fator = fator * b
+
+        alvo = int(round(atual * fator))
+        out.at[i] = max(1, min(alvo, 50))
 
     return pd.to_numeric(out, errors="coerce")
 
