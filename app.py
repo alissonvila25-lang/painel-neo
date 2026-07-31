@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import hmac
+try:
+    from streamlit_autorefresh import st_autorefresh
+    _AUTOREFRESH_OK = True
+except ImportError:
+    _AUTOREFRESH_OK = False
 import json
 import os
 import re
@@ -163,6 +168,13 @@ def _require_login():
 
 
 _require_login()
+
+# Auto-refresh: atualiza a cada 15 min (coincide com ttl do cache do portal).
+# Preserva o session_state — login nao e' perdido na mesma aba.
+# Para desativar: adicione AUTO_REFRESH_INTERVAL_S = "0" nos secrets.
+_ar_interval = int(os.environ.get("AUTO_REFRESH_INTERVAL_S", "900"))
+if _ar_interval > 0 and _AUTOREFRESH_OK:
+    st_autorefresh(interval=_ar_interval * 1000, limit=None, key="prime_autorefresh")
 
 
 # --------------------------------------------------------------------------- #
