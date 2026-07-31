@@ -1,0 +1,12 @@
+fastapi>=0.111
+uvicorn[standard]>=0.29
+pandas>=2.0
+numpy>=1.26
+requests>=2.31
+gspread>=6.0
+google-auth>=2.30
+anthropic>=0.40
+openai>=1.40
+streamlit-autorefresh>=1.0
+streamlit>=1.58
+plotly>=6.8
