@@ -282,8 +282,13 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
     ref   = pd.to_numeric(df.get("Peso Disc"), errors="coerce")
     ref   = ref.fillna(pd.to_numeric(df.get("Peso Config"), errors="coerce"))
     conv  = pd.to_numeric(df.get("% Conversao"),  errors="coerce")
-    disp_pct = pd.to_numeric(df.get("Disponivel %"), errors="coerce")
     disp_abs = pd.to_numeric(df.get("Disponiveis"),  errors="coerce").fillna(0)
+    # calcula Disponivel % a partir das colunas absolutas se nao existir
+    if "Disponivel %" in df.columns:
+        disp_pct = pd.to_numeric(df["Disponivel %"], errors="coerce")
+    else:
+        _tot = pd.to_numeric(df.get("Total da Base"), errors="coerce").fillna(0)
+        disp_pct = (100.0 * disp_abs / _tot.replace(0, float("nan")))
     rod   = df["Rodando"] if "Rodando" in df.columns else pd.Series(False, index=df.index)
 
     exp              = float(thr.get("peso_expoente",      1.2))
@@ -355,7 +360,7 @@ def _sugerir_pesos(df: pd.DataFrame, thr: dict,
                     float(cvv) < cb or float(cvv) < conv_trava) and b <= 1.0:
                 alvo = atual
 
-            out.at[i] = max(0, alvo)
+            out.at[i] = max(0, min(alvo, 50))  # cap: nenhuma sugestao acima de 50
 
     # fallback: campanhas fora do pool
     for i in df.index:
