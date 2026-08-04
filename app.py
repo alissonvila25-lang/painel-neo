@@ -259,7 +259,7 @@ def _mapa_ligacoes():
             today_br() - timedelta(days=7), today_br() - timedelta(days=1),
             extra_fields={
                 "ctl15$Lst_lstIdGroupByRpt": "21",   # agrupar por Campanha
-                "ctl15$Hdn_lstIdGroupByRpt": "false",
+                "ctl15$Hdn_lstIdGroupByRpt": "true",  # habilita o filtro
             }))
         if df is None or df.empty:
             return _empty
@@ -713,6 +713,12 @@ df_camp, acoes = E.analisar(perf, disc, cfg, thr, biases=_biases)
 if df_camp.empty:
     st.info("Sem campanhas com dados no periodo.")
     st.stop()
+# Avisa quando config (peso/curva) nao carregou — afeta Peso Config e Curva.
+_cfg_ok = cfg is not None and not cfg.empty
+if not _cfg_ok:
+    st.warning("⚠️ Config do portal não carregou (peso/curva indisponível). "
+               "Os pesos sugeridos usam Peso Disc como referência. "
+               "Clique em 'Atualizar agora' para tentar novamente.")
 kpi = E.resumo_kpis(df_camp)
 
 # =========================== BASE ========================================== #
