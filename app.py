@@ -196,9 +196,9 @@ def _job(fn):
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _carregar_cfg():
-    """Config de campanha (peso/curva) — muda pouco, cache de 1h."""
+    """Config de campanha (peso/curva) — cache de 10min para pegar novas campanhas."""
     return _job(lambda pa: pa.config_campanha_grupo(PROJETO))
 
 
